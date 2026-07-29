@@ -620,6 +620,30 @@ check("an image within the limit is stored untouched", async () => {
   return downscaleIfHuge(modest, 600, 400, probe) === modest;
 });
 
+check("art survives a rebuild without flickering", async () => {
+  currentPage().layers = [];
+  const canvas = document.createElement("canvas");
+  canvas.width = 800; canvas.height = 600;
+  const context = canvas.getContext("2d");
+  for (let i = 0; i < 6; i += 1) {
+    context.fillStyle = "hsl(" + (i * 60) + ",60%,50%)";
+    context.fillRect(0, 0, 800, 600);
+    addLayer("image", { x: i * 10, y: i * 10, w: 300, h: 220 },
+             { image: canvas.toDataURL("image/png") });
+  }
+  for (let i = 0; i < 8; i += 1) addLayer("caption", { x: 10, y: i * 30 });
+  await new Promise((r) => setTimeout(r, 500));
+  const images = currentPage().layers.filter((l) => l.props && l.props.image);
+  const before = images.filter((l) => nodes.get(l.id).findOne(".art")).length;
+  renderCanvas();
+  // every edit rebuilds the canvas; the art must still be there in the
+  // same frame, not a moment later
+  const immediately = images.filter((l) => nodes.get(l.id).findOne(".art")).length;
+  return before === images.length && immediately === images.length
+    ? true
+    : "before=" + before + " immediately=" + immediately + " of " + images.length;
+});
+
 // layout engine
 check("templates yield their panel count", () => {
   for (let n = 1; n <= 8; n += 1) if (pageLayout(n).length !== n) return "n=" + n;

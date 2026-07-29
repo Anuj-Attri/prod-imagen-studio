@@ -991,7 +991,49 @@ function applyFlip(node, layer) {
   });
 }
 
+// Rebuilding the canvas recreates every node, and decoding an image is
+// asynchronous, so art vanished until it loaded again: every edit made
+// the whole page flash empty. Images do not change once decoded, so keep
+// them and attach synchronously when we already have one.
+const decodedImages = new Map();
+
+function placeArt(group, layer, image) {
+  const old = group.findOne(".art");
+  if (old) old.destroy();
+  // The art must take pointer events: with a hidden or unfilled frame
+  // it is the only hit area the layer has, and without it a rendered
+  // panel can only be grabbed by its 3px border.
+  const art = new Konva.Image({
+    image, width: layer.w, height: layer.h, name: "art",
+  });
+  const crop = layer.props.crop;
+  if (crop) {
+    art.crop({
+      x: crop.x * image.naturalWidth, y: crop.y * image.naturalHeight,
+      width: crop.w * image.naturalWidth, height: crop.h * image.naturalHeight,
+    });
+  }
+  group.add(art);
+  applyFlip(group, layer);
+  const frame = group.findOne(".frame");
+  if (frame) {
+    frame.fillEnabled(false);
+    frame.moveToTop();
+    if (layer.type === "image") frame.visible(false);
+  }
+  const placeholder = group.findOne(".placeholder");
+  if (placeholder) placeholder.visible(false);
+  applyAdjust(group, layer);
+}
+
 function attachImage(group, layer) {
+  const source = layer.props.image;
+  const ready = decodedImages.get(source);
+  if (ready && ready.complete && ready.naturalWidth) {
+    delete layer.props.imageBroken;
+    placeArt(group, layer, ready);      // no flicker: it is already decoded
+    return;
+  }
   const image = new window.Image();
   image.onerror = () => {
     // a truncated render or a damaged file otherwise leaves an empty
@@ -1008,35 +1050,15 @@ this image could not be read`);
   };
   image.onload = () => {
     delete layer.props.imageBroken;
-    const old = group.findOne(".art");
-    if (old) old.destroy();
-    // The art must take pointer events: with a hidden or unfilled frame
-    // it is the only hit area the layer has, and without it a rendered
-    // panel can only be grabbed by its 3px border.
-    const art = new Konva.Image({
-      image, width: layer.w, height: layer.h, name: "art",
-    });
-    const c = layer.props.crop;
-    if (c) {
-      art.crop({
-        x: c.x * image.naturalWidth, y: c.y * image.naturalHeight,
-        width: c.w * image.naturalWidth, height: c.h * image.naturalHeight,
-      });
+    decodedImages.set(source, image);
+    // keep the most recent; a long session should not grow without end
+    if (decodedImages.size > 60) {
+      decodedImages.delete(decodedImages.keys().next().value);
     }
-    group.add(art);
-    applyFlip(group, layer);
-    const frame = group.findOne(".frame");
-    if (frame) {
-      frame.fillEnabled(false);
-      frame.moveToTop();
-      if (layer.type === "image") frame.visible(false);
-    }
-    const placeholder = group.findOne(".placeholder");
-    if (placeholder) placeholder.visible(false);
-    applyAdjust(group, layer);
+    placeArt(group, layer, image);
     pageLayer.batchDraw();
   };
-  image.src = layer.props.image;
+  image.src = source;
 }
 
 function applyAdjust(group, layer) {
