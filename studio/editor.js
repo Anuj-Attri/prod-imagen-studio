@@ -238,8 +238,17 @@ function commit(label) {
   historyIndex = history.length - 1;
   updateHistoryButtons();
   renderHistory();
+  markDirtyState();
 }
 function checkpoint(label) { commit(label); }
+
+// The main process asks before closing only if it knows work is at risk.
+let savedSnapshot = null;
+function markDirtyState() {
+  const dirty = savedSnapshot !== snapshotDoc();
+  document.getElementById("save").textContent = dirty ? "Save *" : "Save";
+  if (window.studio && window.studio.setUnsaved) window.studio.setUnsaved(dirty);
+}
 function restore(entry) {
   const chat = doc.chat;
   doc = JSON.parse(entry.json);
@@ -3076,12 +3085,15 @@ function renderStory() {
 document.getElementById("save").onclick = async () => {
   if (!savePath) {
     savePath = await window.studio.saveProjectDialog(`${doc.name}.dimg`);
-    if (!savePath) return;
+    if (!savePath) return false;   // cancelled: the caller must not close
   }
   const payload = { ...project, name: doc.name, document: doc };
   delete payload._path;
   await window.studio.writeFile(savePath, JSON.stringify(payload));
+  savedSnapshot = snapshotDoc();
+  markDirtyState();
   toast("Saved");
+  return true;
 };
 
 // Rendering a page that is not on screen: swap it in, snapshot, swap
@@ -3411,6 +3423,11 @@ const MENU_ACTIONS = {
   "new-project": () => window.studio.newProjectWindow(),
   "open-project": () => window.studio.openProjectFile(),
   save: () => document.getElementById("save").click(),
+  "save-then-close": async () => {
+    const done = await document.getElementById("save").onclick();
+    // a cancelled save dialog must not close the window
+    if (done && window.studio.closeNow) window.studio.closeNow();
+  },
   "save-as": () => { savePath = null; document.getElementById("save").click(); },
   export: () => document.getElementById("export").click(),
   undo, redo, relayout: relayoutPage,
@@ -3561,3 +3578,5 @@ setPageBackground(doc.style.pageBg);
 loadEngines();
 pollHealth();
 commit("Opened");
+savedSnapshot = snapshotDoc();
+markDirtyState();

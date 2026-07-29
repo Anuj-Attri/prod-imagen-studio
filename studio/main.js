@@ -4,6 +4,9 @@ const fs = require("fs");
 
 const editorWindows = new Set();
 let launcherWindow = null;
+// Renderers report whether they hold unsaved work, so closing a window
+// can ask rather than discard an afternoon of it.
+const unsaved = new Map();
 
 const frameless = {
   frame: false,
@@ -34,7 +37,30 @@ function createEditor(project, opts = {}) {
     query: { project: JSON.stringify(project) },
   });
   editorWindows.add(win);
-  win.on("closed", () => editorWindows.delete(win));
+  win.on("close", (event) => {
+    if (!unsaved.get(win.id)) return;
+    event.preventDefault();
+    const choice = dialog.showMessageBoxSync(win, {
+      type: "warning",
+      buttons: ["Save", "Discard", "Cancel"],
+      defaultId: 0,
+      cancelId: 2,
+      title: "Unsaved changes",
+      message: "This project has changes that are not saved.",
+      detail: "Saving keeps everything. Discarding loses the work since the last save.",
+    });
+    if (choice === 2) return;                       // cancel: stay open
+    if (choice === 1) {                             // discard
+      unsaved.set(win.id, false);
+      win.close();
+      return;
+    }
+    win.webContents.send("menu", "save-then-close"); // save, then close
+  });
+  win.on("closed", () => {
+    unsaved.delete(win.id);
+    editorWindows.delete(win);
+  });
   // Opening from the launcher consumes it; File > New keeps it around.
   if (launcherWindow && !opts.keepLauncher) {
     launcherWindow.close();
@@ -152,6 +178,16 @@ function buildMenu() {
 
 ipcMain.handle("open-project", (_e, project) => { createEditor(project); return true; });
 ipcMain.handle("new-project-window", () => { createLauncher(); return true; });
+ipcMain.on("unsaved", (event, isDirty) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win) unsaved.set(win.id, Boolean(isDirty));
+});
+ipcMain.on("close-now", (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return;
+  unsaved.set(win.id, false);
+  win.close();
+});
 ipcMain.handle("open-project-file", async () => { await openProjectFile(); return true; });
 ipcMain.on("win", (event, action) => {
   const win = BrowserWindow.fromWebContents(event.sender);

@@ -401,6 +401,28 @@ check("a rendered chapter stays small in history", () => {
   return snap.length < 200000;
 });
 
+// unsaved work must be defended
+check("a fresh document is not dirty", () => {
+  savedSnapshot = snapshotDoc();
+  markDirtyState();
+  return document.getElementById("save").textContent === "Save";
+});
+check("an edit marks the document dirty", () => {
+  addLayer("rect", { x: 5, y: 5, w: 20, h: 20 });
+  commit("edit");
+  return document.getElementById("save").textContent === "Save *";
+});
+check("saving clears the dirty mark", () => {
+  savedSnapshot = snapshotDoc();
+  markDirtyState();
+  return document.getElementById("save").textContent === "Save";
+});
+check("dirty state ignores chat, which is not project work", () => {
+  doc.chat.push({ role: "user", content: "hello" });
+  markDirtyState();
+  return document.getElementById("save").textContent === "Save";
+});
+
 // rulers and guides
 check("rulers render page coordinates", () => {
   document.body.classList.add("rulers-on");
