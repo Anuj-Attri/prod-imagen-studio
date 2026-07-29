@@ -5,7 +5,17 @@
    marquee, snap guides, align/distribute, undo/redo, clipboard,
    opacity + blend modes, image adjustments. */
 
-const SERVER = "http://127.0.0.1:8787";
+// Where the generation server lives. Local by default; a deployed one
+// can be named in Settings, with a bearer token when it is protected.
+let SERVER = localStorage.getItem("studio-server") || "http://127.0.0.1:8787";
+let SERVER_TOKEN = localStorage.getItem("studio-token") || "";
+
+function api(path, options) {
+  const settings = options || {};
+  const headers = { ...(settings.headers || {}) };
+  if (SERVER_TOKEN) headers.Authorization = "Bearer " + SERVER_TOKEN;
+  return fetch(SERVER.replace(/\/+$/, "") + path, { ...settings, headers });
+}
 
 // Outside Electron (a browser, a test harness) the preload bridge does
 // not exist. Without this shim the first call to it throws during start
@@ -2406,7 +2416,7 @@ document.getElementById("page-next").onclick = () => goToPage(pageIndex + 1);
 async function loadEngines() {
   const select_ = document.getElementById("engine");
   try {
-    const response = await fetch(`${SERVER}/engines`);
+    const response = await api("/engines");
     const { engines } = await response.json();
     select_.innerHTML = "";
     engines.forEach((engine) => {
@@ -2482,7 +2492,7 @@ function panelSeed(layer) {
 async function generatePanel(layer) {
   if (!engineReady()) throw new Error("no image engine configured");
   const size = renderSize(layer);
-  const response = await fetch(`${SERVER}/generate`, {
+  const response = await api("/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -2849,7 +2859,7 @@ async function applyAgentArtwork(beats, layout) {
   setBusy("Rendering artwork");
   try {
     const size = renderSize(art);
-    const response = await fetch(`${SERVER}/generate`, {
+    const response = await api("/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -2974,7 +2984,7 @@ async function applyAgentPage(panels, cast) {
   }
   setBusy("Rendering the page");
   try {
-    const response = await fetch(`${SERVER}/generate`, {
+    const response = await api("/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -3100,7 +3110,7 @@ document.getElementById("story-analyze").onclick = async () => {
       dialogue: page.layers.filter((l) => ["balloon", "caption", "text"].includes(l.type))
         .map((l) => l.props.text || ""),
     }));
-    const response = await fetch(`${SERVER}/story/analyze`, {
+    const response = await api("/story/analyze", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ project: doc.name, kind: doc.kind, pages, previous: doc.story }),
@@ -3284,9 +3294,8 @@ function showNoEngine(show) {
     ? "Panels are laid out and prompts are written, but nothing can render "
       + "the art yet. Add a hosted key, or run a local engine on your GPU."
     : "Drawing, lettering, editing and export all work without it. "
-      + "Generated art and the agent need it: start it with "
-      + "<code>start-studio.cmd</code> beside the application, or see the "
-      + "readme for running it on another machine.";
+      + "Generated art and the agent need it: run the server from the "
+      + "project, or name a deployed one under Advanced in Settings.";
   box.classList.add("show");
 }
 
@@ -3329,7 +3338,7 @@ function toast(message, isError) {
 
 async function pollHealth() {
   try {
-    const response = await fetch(`${SERVER}/health`);
+    const response = await api("/health");
     const health = await response.json();
     serverReachable = true;
     setEngineDot("eng-local", health.local);
@@ -3378,7 +3387,7 @@ async function sendChat(overrideText, quiet) {
       dialogue: page.layers.filter((l) => ["balloon", "caption", "text", "sfx"].includes(l.type))
         .map((l) => l.props.text || ""),
     }));
-    const response = await fetch(`${SERVER}/agent/chat`, {
+    const response = await api("/agent/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -3427,6 +3436,11 @@ document.getElementById("settings-btn").onclick = async () => {
   document.getElementById("key-bfl").value = saved.bfl || "";
   document.getElementById("key-llm-url").value = saved.llm_url || "";
   document.getElementById("key-llm-model").value = saved.llm_model || "";
+  // the server address belongs to this machine, not to the server's keys
+  document.getElementById("key-server").value =
+    localStorage.getItem("studio-server") || "";
+  document.getElementById("key-server-token").value =
+    localStorage.getItem("studio-token") || "";
   settingsModal.style.display = "grid";
 };
 document.getElementById("settings-cancel").onclick = () => { settingsModal.style.display = "none"; };
@@ -3439,6 +3453,12 @@ document.getElementById("settings-save").onclick = async () => {
     llm_url: document.getElementById("key-llm-url").value.trim(),
     llm_model: document.getElementById("key-llm-model").value.trim(),
   });
+  const address = document.getElementById("key-server").value.trim();
+  const token = document.getElementById("key-server-token").value.trim();
+  localStorage.setItem("studio-server", address);
+  localStorage.setItem("studio-token", token);
+  SERVER = address || "http://127.0.0.1:8787";
+  SERVER_TOKEN = token;
   settingsModal.style.display = "none";
   toast("Saved. Engines refresh in a few seconds.");
   loadEngines();

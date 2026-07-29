@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http://127.0.0.1:8787; object-src 'none'; base-uri 'none'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http://127.0.0.1:8787 http://localhost:8787 https:; object-src 'none'; base-uri 'none'" />
   <title>prod-imagen studio</title>
   <style>
     :root {
@@ -556,6 +556,8 @@
       <details style="margin-top:12px;">
         <summary style="color:var(--ink-3); font-size:11.5px; cursor:pointer;">Advanced</summary>
         <div class="prop-grid" style="margin-top:10px;">
+          <label>Server</label><input id="key-server" placeholder="http://127.0.0.1:8787">
+          <label>Server token</label><input id="key-server-token" placeholder="only if protected">
           <label>Local LLM</label><input id="key-llm-url" placeholder="auto">
           <label>Model</label><input id="key-llm-model" placeholder="auto">
           <label>Anthropic</label><input id="key-anthropic" placeholder="optional">

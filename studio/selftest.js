@@ -368,7 +368,7 @@ check("an offline server is explained, not just implied", () => {
   const detail = box.querySelector("p").textContent;
   serverReachable = true;
   return shown && says.includes("not running")
-    && detail.includes("Drawing") && detail.includes("start-studio");
+    && detail.includes("Drawing") && detail.includes("Settings");
 });
 check("a reachable server with no keys says something different", () => {
   serverReachable = true;
@@ -387,6 +387,32 @@ check("editing works with no server at all", () => {
   // and a page still exports without any backend
   const png = renderPageToDataUrl();
   return made === "balloon,rect" && png.startsWith("data:image/png");
+});
+
+check("the server address and token are configurable", () => {
+  const address = document.getElementById("key-server");
+  const token = document.getElementById("key-server-token");
+  if (!address || !token) return "settings fields missing";
+  // api() must target whatever address is configured, and carry a token
+  const before = SERVER;
+  const beforeToken = SERVER_TOKEN;
+  let sawUrl = null;
+  let sawAuth = null;
+  const realFetch = window.fetch;
+  window.fetch = (url, options) => {
+    sawUrl = url;
+    sawAuth = (options && options.headers && options.headers.Authorization) || null;
+    return Promise.reject(new Error("not sent"));
+  };
+  SERVER = "https://example.invalid/studio/";
+  SERVER_TOKEN = "secret-token";
+  api("/health").catch(() => {});
+  window.fetch = realFetch;
+  SERVER = before;
+  SERVER_TOKEN = beforeToken;
+  // the trailing slash must not produce a doubled separator
+  return sawUrl === "https://example.invalid/studio/health"
+    && sawAuth === "Bearer secret-token";
 });
 
 // layout engine
