@@ -80,8 +80,10 @@ doc.style = doc.style || {
   // itself. "panels": a render per panel, exact beats but weaker
   // continuity between them.
   pageMode: "page",
+  pageBg: "#ffffff",
 };
 if (!doc.style.pageMode) doc.style.pageMode = "page";
+if (!doc.style.pageBg) doc.style.pageBg = "#ffffff";
 doc.cast = doc.cast || [];
 let savePath = project._path || null;
 let pageIndex = 0;
@@ -144,6 +146,51 @@ function updateHistoryButtons() {
   document.getElementById("redo").disabled = historyIndex >= history.length - 1;
 }
 // ----------------------------------------------------------------- style --
+function setPageBackground(hex) {
+  doc.style.pageBg = hex;
+  pageRect.fill(hex);
+  // a dark page needs a light edge to stay visible against the desk
+  pageRect.stroke(luminance(hex) < 0.45 ? "#3a3a44" : "#c9c9d2");
+  pageLayer.batchDraw();
+}
+
+function luminance(hex) {
+  const value = String(hex).replace("#", "");
+  if (value.length !== 6) return 1;
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(value.slice(i, i + 2), 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function invertHex(hex) {
+  const value = String(hex).replace("#", "");
+  if (value.length !== 6) return "#000000";
+  return "#" + [0, 2, 4]
+    .map((i) => (255 - parseInt(value.slice(i, i + 2), 16)).toString(16).padStart(2, "0"))
+    .join("");
+}
+
+// Flip the page and every piece of lettering at once, for inverted
+// looks where white ink sits on black paper.
+function invertPage() {
+  setPageBackground(invertHex(doc.style.pageBg));
+  doc.pages.forEach((page) => {
+    page.layers.forEach((layer) => {
+      if (!TEXT_TYPES.includes(layer.type)) return;
+      ["fill", "stroke", "color", "bg", "ink"].forEach((key) => {
+        if (typeof layer.props[key] === "string" && layer.props[key].startsWith("#")) {
+          layer.props[key] = invertHex(layer.props[key]);
+        }
+      });
+      if (layer.type === "balloon" && !layer.props.bg) layer.props.bg = "#000000";
+      if (layer.type === "balloon" && !layer.props.color) layer.props.color = "#ffffff";
+    });
+  });
+  renderCanvas();
+  renderStylePanel();
+  commit("Invert page and ink");
+  toast("Page and lettering inverted");
+}
+
 function mergeCast(incoming) {
   if (!Array.isArray(incoming) || !incoming.length) return;
   incoming.forEach((entry) => {
@@ -171,6 +218,8 @@ function renderStylePanel() {
         <option value="page" ${doc.style.pageMode !== "panels" ? "selected" : ""}>Whole page at once</option>
         <option value="panels" ${doc.style.pageMode === "panels" ? "selected" : ""}>Panel by panel</option>
       </select>
+      <label>Page colour</label><input id="style-bg" type="color" value="${doc.style.pageBg}">
+      <label></label><button id="style-invert" style="width:100%">Invert page and ink</button>
       <label>Lock seeds</label><input id="style-lock" type="checkbox" ${doc.style.lockSeed ? "checked" : ""}>
       <div class="prop-note">${doc.style.pageMode === "panels"
         ? "Each panel is its own render: exact control per beat, but panels can drift apart in look."
@@ -232,6 +281,12 @@ function renderStylePanel() {
     renderStylePanel();
     commit();
   });
+  document.getElementById("style-bg").addEventListener("input", (e) => {
+    setPageBackground(e.target.value);
+  });
+  document.getElementById("style-bg").addEventListener("change", () =>
+    commit("Page colour"));
+  document.getElementById("style-invert").addEventListener("click", invertPage);
   document.getElementById("cast-add").addEventListener("click", () => {
     doc.cast.push({ id: uid(), name: "New character", tags: "" });
     renderStylePanel();
@@ -359,7 +414,7 @@ stage.add(pageLayer, uiLayer);
 
 const pageRect = new Konva.Rect({
   x: 0, y: 0, width: PAGE.w, height: PAGE.h,
-  fill: "#ffffff", stroke: "#c9c9d2", strokeWidth: 1,
+  fill: doc.style.pageBg || "#ffffff", stroke: "#c9c9d2", strokeWidth: 1,
   shadowColor: "#000", shadowBlur: 30, shadowOpacity: 0.45, listening: false,
 });
 world.add(pageRect);
@@ -524,7 +579,8 @@ function buildNode(layer) {
   } else if (layer.type === "balloon") {
     node = new Konva.Label(common);
     node.add(new Konva.Tag({
-      fill: layer.props.bg || "#fff", stroke: "#111", strokeWidth: 2.5, cornerRadius: 18,
+      fill: layer.props.bg || "#fff", stroke: layer.props.ink || "#111",
+      strokeWidth: 2.5, cornerRadius: 18,
       pointerDirection: "down", pointerWidth: 22, pointerHeight: 26,
     }));
     node.add(new Konva.Text({
@@ -541,7 +597,7 @@ function buildNode(layer) {
     });
     node.add(new Konva.Rect({
       width: layer.w, height: text.height(), name: "frame",
-      fill: layer.props.bg || "#fdf6de", stroke: "#111", strokeWidth: 2,
+      fill: layer.props.bg || "#fdf6de", stroke: layer.props.ink || "#111", strokeWidth: 2,
     }));
     node.add(text);
   } else if (layer.type === "text") {
@@ -2598,6 +2654,7 @@ fitPage();
 renderCanvas();
 renderStory();
 renderStylePanel();
+setPageBackground(doc.style.pageBg);
 loadEngines();
 pollHealth();
 commit("Opened");

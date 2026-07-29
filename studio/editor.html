@@ -7,7 +7,10 @@
     :root {
       /* Obsidian + Void Violet (dark is default) */
       --bg: #0b0a0e; --surface: #121016; --surface-2: #17151c; --surface-3: #1d1a23;
-      --hairline: rgba(255,255,255,0.07); --hairline-strong: rgba(255,255,255,0.14);
+      --hairline: rgba(255,255,255,0.10); --hairline-strong: rgba(255,255,255,0.18);
+      /* Region boundaries carry more weight than inner hairlines, so the
+         window reads as separate panes rather than one dark slab. */
+      --edge: rgba(255,255,255,0.22); --edge-w: 1px;
       --ink: #e9e7ee; --ink-2: rgba(233,231,238,0.62); --ink-3: rgba(233,231,238,0.42);
       --accent-deep: #3d2f7a; --accent: #5a4ca8; --accent-glow: #7a6cc8;
       --accent-soft: rgba(90,76,168,0.20);
@@ -18,7 +21,8 @@
     }
     :root[data-theme="light"] {
       --bg: #ffffff; --surface: #fbfbfa; --surface-2: #f2f1f4; --surface-3: #eae8ee;
-      --hairline: rgba(20,18,24,0.10); --hairline-strong: rgba(20,18,24,0.20);
+      --hairline: rgba(20,18,24,0.14); --hairline-strong: rgba(20,18,24,0.26);
+      --edge: rgba(20,18,24,0.34); --edge-w: 1px;
       --ink: #100e14; --ink-2: rgba(16,14,20,0.64); --ink-3: rgba(16,14,20,0.45);
       --accent-deep: #221a45; --accent: #3d2f7a; --accent-glow: #5a4ca8;
       --accent-soft: rgba(61,47,122,0.10);
@@ -59,7 +63,7 @@
     /* ===== frameless top bar (drag region) ===== */
     #topbar {
       grid-area: top; display: flex; align-items: center; gap: 12px;
-      background: var(--surface); border-bottom: 1px solid var(--hairline); padding: 0 0 0 14px;
+      background: var(--surface); border-bottom: var(--edge-w) solid var(--edge); padding: 0 0 0 14px;
       -webkit-app-region: drag;
     }
     #topbar button, #topbar select, #winctl { -webkit-app-region: no-drag; }
@@ -115,7 +119,7 @@
     #winctl button.close:hover { background: #b3352c; color: #fff; }
     /* ===== tool rail ===== */
     #tools {
-      grid-area: tools; background: var(--surface); border-right: 1px solid var(--hairline);
+      grid-area: tools; background: var(--surface); border-right: var(--edge-w) solid var(--edge);
       display: flex; flex-direction: column; align-items: center; gap: 3px; padding-top: 12px;
     }
     .tool {
@@ -174,8 +178,8 @@
     #zoom-controls button:hover { color: var(--ink); background: var(--surface-2); }
     #zoom-pct { min-width: 44px; text-align: center; color: var(--ink-2); font-size: 11.5px; font-variant-numeric: tabular-nums; }
     /* ===== right dock ===== */
-    #dock { grid-area: dock; background: var(--surface); border-left: 1px solid var(--hairline); display: flex; flex-direction: column; min-height: 0; }
-    #dock-tabs { display: flex; border-bottom: 1px solid var(--hairline); padding: 0 4px; }
+    #dock { grid-area: dock; background: var(--surface); border-left: var(--edge-w) solid var(--edge); display: flex; flex-direction: column; min-height: 0; }
+    #dock-tabs { display: flex; border-bottom: 1px solid var(--hairline-strong); padding: 0 4px; }
     .dock-tab {
       flex: 1; text-align: center; padding: 10px 0 9px; font-size: 10.5px; letter-spacing: 0.05em;
       text-transform: uppercase; color: var(--ink-3); cursor: pointer;
@@ -248,7 +252,7 @@
     /* ===== status bar ===== */
     #status {
       grid-area: status; display: flex; align-items: center; gap: 16px; padding: 0 14px;
-      background: var(--surface); border-top: 1px solid var(--hairline); font-size: 11.5px; color: var(--ink-3);
+      background: var(--surface); border-top: var(--edge-w) solid var(--edge); font-size: 11.5px; color: var(--ink-3);
     }
     #status .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--hairline-strong); margin-right: 6px; }
     #status .eng.ok .dot { background: var(--good); }
