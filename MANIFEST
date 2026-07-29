@@ -31,4 +31,6 @@ studio/package.json
 studio/pdfcheck.js
 studio/preload.js
 studio/selftest.js
+studio/workflow.js
+studio/workflowcheck.js
 verify.js

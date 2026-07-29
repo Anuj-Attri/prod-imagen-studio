@@ -98,7 +98,8 @@ function waitForServer(port, timeoutMs) {
     "--check", path.join("studio", "main.js"),
   ]));
   ["preload.js", "editor.js", "launcher.js", "selftest.js", "e2e.js",
-   "filecheck.js", "pdfcheck.js", "mutate.js"].forEach((file) => {
+   "filecheck.js", "pdfcheck.js", "mutate.js", "workflow.js",
+   "workflowcheck.js"].forEach((file) => {
     step(`${file} parses`, () => node(["--check", path.join("studio", file)]));
   });
   // A repository is a denylist by default: everything not ignored is
@@ -128,6 +129,8 @@ function waitForServer(port, timeoutMs) {
   step("renderer self-test", () => node([path.join("studio", "selftest.js")]));
   step("written files are what they claim", () =>
     node([path.join("studio", "filecheck.js")]));
+  step("the workflow keeps its promises", () =>
+    node([path.join("studio", "workflowcheck.js")]));
 
   // The probe needs a server. Start one that reaches nothing, which is
   // what a build machine has anyway, and stop it afterwards.
