@@ -357,6 +357,38 @@ check("a marquee selects what it covers", () => {
       + picked.includes(outside.id) + ")";
 });
 
+// A fresh install has no server: the app must still work and must say
+// why the parts that need one are unavailable.
+check("an offline server is explained, not just implied", () => {
+  serverReachable = false;
+  showNoEngine(true);
+  const box = document.getElementById("no-engine");
+  const shown = box.classList.contains("show");
+  const says = box.querySelector("b").textContent;
+  const detail = box.querySelector("p").textContent;
+  serverReachable = true;
+  return shown && says.includes("not running")
+    && detail.includes("Drawing") && detail.includes("start-studio");
+});
+check("a reachable server with no keys says something different", () => {
+  serverReachable = true;
+  showNoEngine(true);
+  const says = document.getElementById("no-engine").querySelector("b").textContent;
+  return says.includes("No image engine");
+});
+check("editing works with no server at all", () => {
+  currentPage().layers = [];
+  setTool("rect");
+  dragOnStage({ x: 40, y: 40 }, { x: 160, y: 140 });
+  setTool("balloon");
+  dragOnStage({ x: 60, y: 60 }, { x: 60, y: 60 });
+  setTool("select");
+  const made = currentPage().layers.map((l) => l.type).sort().join(",");
+  // and a page still exports without any backend
+  const png = renderPageToDataUrl();
+  return made === "balloon,rect" && png.startsWith("data:image/png");
+});
+
 // layout engine
 check("templates yield their panel count", () => {
   for (let n = 1; n <= 8; n += 1) if (pageLayout(n).length !== n) return "n=" + n;

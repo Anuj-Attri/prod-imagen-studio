@@ -3267,9 +3267,27 @@ function setBusy(text) {
   busyTimer = setInterval(tick, 1000);
 }
 
+let serverReachable = true;
+
+// A packaged install ships the application only: the generation server
+// is started separately. Someone opening the app for the first time
+// otherwise sees nothing but the words "server offline" in a dropdown.
 function showNoEngine(show) {
-  document.getElementById("no-engine").classList.toggle("show",
-    show && !engineReady() && !currentPage().layers.some((l) => l.props && l.props.image));
+  const box = document.getElementById("no-engine");
+  const alreadyDrawn = currentPage().layers.some((l) => l.props && l.props.image);
+  const wanted = show && !engineReady() && !alreadyDrawn;
+  if (!wanted) { box.classList.remove("show"); return; }
+  box.querySelector("b").textContent = serverReachable
+    ? "No image engine configured"
+    : "The generation server is not running";
+  box.querySelector("p").innerHTML = serverReachable
+    ? "Panels are laid out and prompts are written, but nothing can render "
+      + "the art yet. Add a hosted key, or run a local engine on your GPU."
+    : "Drawing, lettering, editing and export all work without it. "
+      + "Generated art and the agent need it: start it with "
+      + "<code>start-studio.cmd</code> beside the application, or see the "
+      + "readme for running it on another machine.";
+  box.classList.add("show");
 }
 
 // Draggable splitter: the right dock is resizable and the width sticks.
@@ -3313,12 +3331,16 @@ async function pollHealth() {
   try {
     const response = await fetch(`${SERVER}/health`);
     const health = await response.json();
+    serverReachable = true;
     setEngineDot("eng-local", health.local);
     setEngineDot("eng-api", health.apis);
     setEngineDot("eng-story", health.story);
   } catch {
+    serverReachable = false;
     ["eng-local", "eng-api", "eng-story"].forEach((id) => setEngineDot(id, false));
   }
+  // an offline server is worth saying plainly, not only in a dropdown
+  showNoEngine(!serverReachable || currentPage().layers.some((l) => l.type === "panel"));
   setTimeout(pollHealth, 6000);
 }
 function setEngineDot(id, ok) {
