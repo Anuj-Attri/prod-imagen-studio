@@ -9,20 +9,34 @@ directing agent that lays out whole pages.
 > Personal and noncommercial use is free; commercial licensing is
 > reserved by the author. See [LICENSE](LICENSE).
 
-## What it does
+## What it makes
+
+One tool for a manga chapter, a coloring book, a poster, a greeting card
+and a systems blueprint. Each is the same layered page underneath, with
+its own paper size, default look and build recipe.
 
 - **Pages, not prompts.** Describe a scene and the agent returns the
-  beats. The application places the panels using comics layout
-  templates: tiers, proper gutters, right-to-left order for manga.
+  beats; the application places the panels using comics layout templates
+  with proper gutters and right-to-left order for manga. Ask again and
+  it continues onto a new page, so a chapter accumulates.
 - **A style contract per project.** One art style preset plus a cast
   sheet of permanent appearance tags per character, applied to every
-  panel, so a sequence reads as one artist rather than several.
+  panel, so a sequence reads as one artist rather than several. Presets
+  carry a negative as well, which is what keeps a coloring page as flat
+  line art instead of a painting.
+- **Diagrams are drawn, not generated.** A blueprint returns components
+  and connections, laid out as real boxes and arrows ordered by flow.
+  Every box, arrow and label stays an editable layer.
 - **Lettering stays vector.** Balloons, captions and onomatopoeia are
   real text objects with fonts, colours and outlines. No model is ever
   asked to render words.
-- **A real editor.** Brush and eraser, shapes, image import with crop
-  and adjustments, multi-select with snapping, align and distribute,
-  layer opacity and blend modes, undo/redo and named version history.
+- **A real editor.** Brush and eraser, shapes with gradient fills, image
+  import with crop and adjustments, multi-select with snapping, rulers
+  and guides, align and distribute, flip and group, opacity and blend
+  modes, undo/redo with named version history, and a right-click menu
+  wherever you would expect one.
+- **Export.** A page as PNG, every page at once, or the whole chapter as
+  a single PDF at the document's real size.
 - **Local by default.** Art can render on your own GPU and the agent
   runs against a local language model. Nothing leaves the machine
   unless you configure a hosted provider yourself.
