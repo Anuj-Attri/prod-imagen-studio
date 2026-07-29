@@ -3234,12 +3234,12 @@ document.getElementById("theme-toggle").onclick = () => {
   localStorage.setItem("studio-theme", next);
 };
 
-async function sendChat() {
+async function sendChat(overrideText, quiet) {
   const input = document.getElementById("chat-input");
-  const text = input.value.trim();
+  const text = (overrideText != null ? overrideText : input.value).trim();
   if (!text) return;
-  input.value = "";
-  appendMsg("user", text);
+  if (overrideText == null) input.value = "";
+  if (!quiet) appendMsg("user", text);
   doc.chat.push({ role: "user", content: text });
   const thinking = appendMsg("agent", "…");
   setBusy("Directing the page");
@@ -3315,7 +3315,36 @@ document.getElementById("settings-save").onclick = async () => {
 };
 
 doc.chat.forEach((m) => appendMsg(m.role === "user" ? "user" : "agent", m.content));
-document.getElementById("chat-send").onclick = sendChat;
+document.getElementById("chat-send").onclick = () => sendChat();
+
+// Repeat the last brief across several new pages. Each round is told
+// what came before so the pages differ instead of duplicating.
+async function generateMorePages(count) {
+  const lastBrief = [...doc.chat].reverse().find((m) => m.role === "user");
+  if (!lastBrief) { toast("Ask the agent for a page first"); return; }
+  const button = document.getElementById("more-pages");
+  button.disabled = true;
+  try {
+    for (let i = 0; i < count; i += 1) {
+      setBusy(`Building page ${i + 2} of ${count + 1}`);
+      await sendChat(
+        `${lastBrief.content}
+
+This is a further page in the same work. `
+        + "Use a different scene, composition and camera from the previous "
+        + "pages, keeping the same characters and style.", true);
+    }
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    setBusy(null);
+    button.disabled = false;
+  }
+}
+document.getElementById("more-pages").onclick = () => {
+  const count = parseInt(document.getElementById("more-count").value, 10) || 1;
+  generateMorePages(Math.min(Math.max(count, 1), 12));
+};
 document.getElementById("chat-input").addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendChat(); }
 });

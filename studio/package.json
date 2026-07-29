@@ -21,12 +21,15 @@
     "appId": "studio.prodimagen.app",
     "productName": "prod-imagen studio",
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "../build"
     },
     "files": [
       "**/*",
       "!dist",
-      "!**/*.map"
+      "!**/*.map",
+      "!selftest.js",
+      "!__selftest*"
     ],
     "win": {
       "target": [
@@ -36,7 +39,8 @@
             "x64"
           ]
         }
-      ]
+      ],
+      "icon": "../build/icon.ico"
     },
     "nsis": {
       "oneClick": true,
@@ -59,7 +63,8 @@
           ]
         }
       ],
-      "category": "public.app-category.graphics-design"
+      "category": "public.app-category.graphics-design",
+      "icon": "../build/icon.png"
     },
     "publish": [
       {
