@@ -764,6 +764,58 @@ check("layer rename commits", () => {
   return findLayer(layer.id).name === "Renamed layer";
 });
 
+// each document type must build the right structure, end to end
+check("poster: artwork plus headline below it", async () => {
+  doc.kind = "poster";
+  doc.style.preset = "poster";
+  await applyAgentArtwork([{
+    prompt: "1boy, saxophone, jazz club, dim light",
+    dialogue: [{ kind: "text", text: "JAZZ NIGHT" }, { kind: "text", text: "9 PM" }],
+  }], "poster");
+  const art = currentPage().layers.filter(l => l.type === "image");
+  const texts = currentPage().layers.filter(l => l.type === "text");
+  if (art.length !== 1 || texts.length !== 2) return "art=" + art.length + " text=" + texts.length;
+  // the headline sits in the lower part of the page, over the art
+  return texts[0].y > PAGE.h * 0.6 && art[0].h === PAGE.h;
+});
+check("card: greeting sits below a shorter artwork", async () => {
+  doc.kind = "card";
+  doc.style.preset = "card";
+  await applyAgentArtwork([{
+    prompt: "1girl, witch, pumpkin, full moon",
+    dialogue: [{ kind: "text", text: "Happy Halloween!" }],
+  }], "card");
+  const art = currentPage().layers.find(l => l.type === "image");
+  const greeting = currentPage().layers.find(l => l.type === "text");
+  return art.h < PAGE.h && greeting.y >= art.h;
+});
+check("coloring: one artwork, one caption", async () => {
+  doc.kind = "coloring";
+  doc.style.preset = "coloring";
+  await applyAgentArtwork([{
+    prompt: "1dragon, rabbits, tea party, garden",
+    dialogue: [{ kind: "caption", text: "A tea party" }],
+  }], "single");
+  const art = currentPage().layers.filter(l => l.type === "image");
+  const captions = currentPage().layers.filter(l => l.type === "caption");
+  return art.length === 1 && captions.length === 1 && art[0].h === PAGE.h;
+});
+check("comic page still lays out panels", async () => {
+  doc.kind = "manga";
+  doc.style.preset = "manga";
+  doc.style.pageMode = "panels";
+  await applyAgentPanels([
+    { prompt: "1girl, standing, rooftop", dialogue: [{ kind: "balloon", text: "Hi" }] },
+    { prompt: "1girl, running, alley" },
+    { prompt: "1girl, jumping, night" },
+  ], { replacePage: true });
+  const panels = currentPage().layers.filter(l => l.type === "panel");
+  const balloons = currentPage().layers.filter(l => l.type === "balloon");
+  return panels.length === 3 && balloons.length === 1;
+});
+check("building each kind never destroyed earlier pages", () =>
+  doc.pages.filter(p => p.layers.length).length >= 4);
+
 // rulers and guides
 check("rulers render page coordinates", () => {
   document.body.classList.add("rulers-on");
