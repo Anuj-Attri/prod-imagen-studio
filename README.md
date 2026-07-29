@@ -120,7 +120,8 @@ Free, offline and unlimited. Needs an NVIDIA GPU with 12 GB or more.
     .venv-image/Scripts/python -m pip install torch --index-url https://download.pytorch.org/whl/cu128
     .venv-image/Scripts/python -m pip install diffusers transformers accelerate safetensors pillow
 
-The first render downloads the model (about 7 GB, cached afterwards).
+The first render downloads the model, which is about 13 GB on disk and
+is cached afterwards.
 Set `LOCAL_IMAGE_MODEL` to use a different checkpoint. The launcher
 prefers this interpreter automatically when it exists.
 
