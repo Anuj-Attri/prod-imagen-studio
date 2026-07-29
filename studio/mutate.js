@@ -60,6 +60,18 @@ const MUTATIONS = [
     to: "    if (selectedIds.length === 1) snapDrag(node);\n    else selectedLayers().forEach((l) => { const n = nodes.get(l.id); if (n && n !== node) n.move({ x: 5, y: 5 }); });",
   },
   {
+    what: "the pdf is written at a fixed size, not the page's",
+    expect: "the pdf carries every page",
+    from: "      widthPx: PAGE.w, heightPx: PAGE.h, images,",
+    to: "      widthPx: 800, heightPx: 600, images,",
+  },
+  {
+    what: "the pdf silently drops all but the first page",
+    expect: "the pdf carries every page",
+    from: "    await forEachPageSnapshot((dataUrl) => { images.push(dataUrl); });",
+    to: "    await forEachPageSnapshot((dataUrl) => { if (!images.length) images.push(dataUrl); });",
+  },
+  {
     what: "the balloon body ignores its own position",
     expect: "a balloon sits where it says it does",
     from: "    node = new Konva.Group(common);\n    const padding = 13;",

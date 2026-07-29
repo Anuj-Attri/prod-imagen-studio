@@ -1271,8 +1271,30 @@ check("snapshot walk covers every page and restores position", async () => {
   });
   return seen.length === doc.pages.length && pageIndex === 1;
 });
-check("pdf export is reachable", () =>
-  !!document.getElementById("export-pdf") && typeof window.studio.exportPdf === "function");
+check("the pdf carries every page at the document's own size", async () => {
+  doc.pages = [];
+  for (let i = 0; i < 3; i += 1) {
+    doc.pages.push({ id: uid(), name: "Page " + (i + 1), layers: [] });
+  }
+  pageIndex = 0;
+  renderCanvas();
+  addLayer("text", { x: 20, y: 20 }).props.text = "a page with something on it";
+
+  let sent = null;
+  const real = window.studio.exportPdf;
+  window.studio.exportPdf = async (payload) => { sent = payload; return "out.pdf"; };
+  await document.getElementById("export-pdf").onclick();
+  window.studio.exportPdf = real;
+
+  if (!sent) return "nothing was handed to the writer";
+  if (sent.images.length !== 3) return "carried " + sent.images.length + " pages of 3";
+  if (sent.widthPx !== PAGE.w || sent.heightPx !== PAGE.h) {
+    return "sized " + sent.widthPx + "x" + sent.heightPx
+      + " rather than " + PAGE.w + "x" + PAGE.h;
+  }
+  return sent.images.every((png) => String(png).startsWith("data:image/png"))
+    ? true : "a page was not a rendered image";
+});
 
 // history
 check("named checkpoints recorded", () => {
