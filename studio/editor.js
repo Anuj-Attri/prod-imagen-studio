@@ -76,7 +76,12 @@ doc.style = doc.style || {
   preset: doc.kind === "manga" ? "manga" : "anime",
   extra: "",
   lockSeed: true,
+  // "page": one render for the whole page, which cannot disagree with
+  // itself. "panels": a render per panel, exact beats but weaker
+  // continuity between them.
+  pageMode: "page",
 };
+if (!doc.style.pageMode) doc.style.pageMode = "page";
 doc.cast = doc.cast || [];
 let savePath = project._path || null;
 let pageIndex = 0;
@@ -162,7 +167,14 @@ function renderStylePanel() {
     <div class="prop-grid">
       <label>Art style</label><select id="style-preset">${options}</select>
       <label>Extra tags</label><input id="style-extra" value="${escapeHtml(doc.style.extra || "")}" placeholder="optional, comma separated">
+      <label>Render</label><select id="style-mode">
+        <option value="page" ${doc.style.pageMode !== "panels" ? "selected" : ""}>Whole page at once</option>
+        <option value="panels" ${doc.style.pageMode === "panels" ? "selected" : ""}>Panel by panel</option>
+      </select>
       <label>Lock seeds</label><input id="style-lock" type="checkbox" ${doc.style.lockSeed ? "checked" : ""}>
+      <div class="prop-note">${doc.style.pageMode === "panels"
+        ? "Each panel is its own render: exact control per beat, but panels can drift apart in look."
+        : "One render for the entire page. The art cannot disagree with itself, and it is far faster. Redraw single panels afterwards from the Layers tab."}</div>
       <div class="prop-note">${escapeHtml(preset ? preset.tags : "")}</div>
       <div class="prop-note">Applied to every panel on every page, so the
         sequence reads as one artist. Locked seeds make a re-render of an
@@ -213,6 +225,11 @@ function renderStylePanel() {
   });
   document.getElementById("style-lock").addEventListener("change", (e) => {
     doc.style.lockSeed = e.target.checked;
+    commit();
+  });
+  document.getElementById("style-mode").addEventListener("change", (e) => {
+    doc.style.pageMode = e.target.value;
+    renderStylePanel();
     commit();
   });
   document.getElementById("cast-add").addEventListener("click", () => {
@@ -369,6 +386,7 @@ function fontOf(layer) { return layer.props.font || FONT_DEFAULTS[layer.type] ||
 // axis-aligned; sfx and freeform art rotate.
 const ROTATABLE = ["sfx", "image", "rect", "ellipse", "star", "text", "draw", "line", "arrow"];
 const POINT_TYPES = ["draw", "line", "arrow"]; // geometry lives in points, not w/h
+const TEXT_TYPES = ["balloon", "caption", "text", "sfx"]; // sized by font
 
 // ------------------------------------------------------------- pan/zoom --
 let zoom = 1;
@@ -541,7 +559,7 @@ function buildNode(layer) {
       fontSize: layer.props.fontSize, fill: layer.props.fill,
       stroke: layer.props.stroke, strokeWidth: layer.props.strokeWidth,
       fillAfterStrokeEnabled: true, lineJoin: "round",
-      name: "label-text",
+      align: "center", name: "label-text",
     }));
   } else {
     node = new Konva.Group(common);
@@ -611,8 +629,11 @@ function attachImage(group, layer) {
   image.onload = () => {
     const old = group.findOne(".art");
     if (old) old.destroy();
+    // The art must take pointer events: with a hidden or unfilled frame
+    // it is the only hit area the layer has, and without it a rendered
+    // panel can only be grabbed by its 3px border.
     const art = new Konva.Image({
-      image, width: layer.w, height: layer.h, name: "art", listening: false,
+      image, width: layer.w, height: layer.h, name: "art",
     });
     const c = layer.props.crop;
     if (c) {
@@ -722,6 +743,17 @@ transformer.on("transformend", () => {
       if (layer.type === "draw") {
         layer.props.strokeWidth = Math.max(1, Math.round(layer.props.strokeWidth * (scaleX + scaleY) / 2));
       }
+    } else if (TEXT_TYPES.includes(layer.type)) {
+      // Type is sized by font, not by a box: scaling the width alone
+      // would do nothing visible. Side handles reflow, the bottom
+      // handle sets type size, a corner does both.
+      if (layer.type === "sfx") {
+        const uniform = (scaleX + scaleY) / 2;
+        layer.props.fontSize = Math.max(8, Math.round(layer.props.fontSize * uniform));
+      } else {
+        layer.props.fontSize = Math.max(6, Math.round(layer.props.fontSize * scaleY));
+      }
+      layer.w = Math.round(Math.max(40, layer.w * scaleX));
     } else {
       layer.w = Math.round(Math.max(24, layer.w * scaleX));
       layer.h = Math.round(Math.max(24, layer.h * scaleY));
@@ -950,19 +982,52 @@ function renderLayerList() {
       if (event.target.classList.contains("lock")) { layer.locked = !layer.locked; renderCanvas(); commit(); return; }
       select(layer.id, { toggle: event.shiftKey || event.ctrlKey });
     });
-    row.addEventListener("dragstart", (event) => event.dataTransfer.setData("text/plain", layer.id));
-    row.addEventListener("dragover", (event) => event.preventDefault());
+    row.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!selectedIds.includes(layer.id)) select(layer.id);
+      showContextMenu(event.clientX, event.clientY, contextItemsForSelection());
+    });
+    // Reordering drops above or below the row the pointer is nearest to,
+    // with a visible insertion line, instead of swapping blindly.
+    row.addEventListener("dragstart", (event) => {
+      event.dataTransfer.setData("text/plain", layer.id);
+      event.dataTransfer.effectAllowed = "move";
+      row.classList.add("dragging");
+    });
+    row.addEventListener("dragend", () => {
+      row.classList.remove("dragging");
+      list.querySelectorAll(".layer-row").forEach((r) =>
+        r.classList.remove("drop-above", "drop-below"));
+    });
+    row.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      const box = row.getBoundingClientRect();
+      const above = event.clientY < box.top + box.height / 2;
+      list.querySelectorAll(".layer-row").forEach((r) =>
+        r.classList.remove("drop-above", "drop-below"));
+      row.classList.add(above ? "drop-above" : "drop-below");
+    });
+    row.addEventListener("dragleave", () =>
+      row.classList.remove("drop-above", "drop-below"));
     row.addEventListener("drop", (event) => {
       event.preventDefault();
       event.stopPropagation();
       const draggedId = event.dataTransfer.getData("text/plain");
+      list.querySelectorAll(".layer-row").forEach((r) =>
+        r.classList.remove("drop-above", "drop-below"));
       if (!draggedId || draggedId === layer.id) return;
       const arr = currentPage().layers;
       const from = arr.findIndex((l) => l.id === draggedId);
-      const to = arr.findIndex((l) => l.id === layer.id);
-      if (from < 0 || to < 0) return;
+      if (from < 0) return;
+      const box = row.getBoundingClientRect();
+      const dropAbove = event.clientY < box.top + box.height / 2;
       const [moved] = arr.splice(from, 1);
-      arr.splice(to, 0, moved);
+      // the list is drawn top-down but the model is bottom-up
+      const target = arr.findIndex((l) => l.id === layer.id);
+      if (target < 0) { arr.splice(from, 0, moved); return; }
+      arr.splice(dropAbove ? target + 1 : target, 0, moved);
       renderCanvas();
       commit();
     });
@@ -1024,6 +1089,139 @@ function renderOptions() {
   bar.querySelectorAll("[data-dist]").forEach((b) => b.addEventListener("click", () => distributeSelected(b.dataset.dist)));
   bar.querySelectorAll("[data-order]").forEach((b) => b.addEventListener("click", () => reorderSelected(b.dataset.order)));
 }
+
+// ------------------------------------------------------- context menu --
+const contextMenu = document.createElement("div");
+contextMenu.className = "menu-drop";
+document.body.appendChild(contextMenu);
+
+function hideContextMenu() { contextMenu.classList.remove("show"); }
+
+function showContextMenu(clientX, clientY, items) {
+  contextMenu.innerHTML = items.map((item, index) => item === "-"
+    ? '<div class="menu-sep"></div>'
+    : `<div class="menu-item" data-idx="${index}"${item.disabled ? ' style="opacity:.4"' : ""}>` +
+      `${escapeHtml(item.label)}${item.accel ? `<span class="accel">${item.accel}</span>` : ""}</div>`
+  ).join("");
+  contextMenu.classList.add("show");
+  // keep the menu on screen when opened near an edge
+  const { offsetWidth: w, offsetHeight: h } = contextMenu;
+  contextMenu.style.left = Math.min(clientX, window.innerWidth - w - 8) + "px";
+  contextMenu.style.top = Math.min(clientY, window.innerHeight - h - 8) + "px";
+  contextMenu.querySelectorAll(".menu-item").forEach((el) => {
+    const item = items[Number(el.dataset.idx)];
+    if (!item || item.disabled) return;
+    el.addEventListener("click", () => { hideContextMenu(); item.run(); });
+  });
+}
+
+function contextItemsForSelection() {
+  const layers = selectedLayers();
+  const one = layers.length === 1 ? layers[0] : null;
+  const items = [
+    { label: "Cut", accel: "Ctrl+X", run: () => { copySelected(); deleteSelected(); } },
+    { label: "Copy", accel: "Ctrl+C", run: copySelected },
+    { label: "Duplicate", accel: "Ctrl+D", run: duplicateSelected },
+    { label: "Delete", accel: "Del", run: deleteSelected },
+    "-",
+    { label: "Bring to Front", accel: "Ctrl+Shift+]", run: () => reorderSelected("front") },
+    { label: "Bring Forward", accel: "Ctrl+]", run: () => reorderSelected("forward") },
+    { label: "Send Backward", accel: "Ctrl+[", run: () => reorderSelected("backward") },
+    { label: "Send to Back", accel: "Ctrl+Shift+[", run: () => reorderSelected("back") },
+    "-",
+    {
+      label: layers.every((l) => l.locked) ? "Unlock" : "Lock",
+      run: () => {
+        const lock = !layers.every((l) => l.locked);
+        layers.forEach((l) => { l.locked = lock; });
+        renderCanvas();
+        commit();
+      },
+    },
+    {
+      label: layers.every((l) => !l.visible) ? "Show" : "Hide",
+      run: () => {
+        const show = layers.every((l) => !l.visible);
+        layers.forEach((l) => { l.visible = show; });
+        renderCanvas();
+        commit();
+      },
+    },
+  ];
+  if (layers.length > 1) {
+    items.push("-",
+      { label: "Align Left", run: () => alignSelected("left") },
+      { label: "Align Top", run: () => alignSelected("top") },
+      { label: "Distribute Horizontally", disabled: layers.length < 3, run: () => distributeSelected("h") },
+    );
+  }
+  if (one && TEXT_TYPES.includes(one.type)) {
+    items.push("-", {
+      label: "Edit Text",
+      run: () => {
+        const node = nodes.get(one.id);
+        if (node) editTextInline(node, one);
+      },
+    });
+  }
+  if (one && one.type === "panel") {
+    items.push("-", {
+      label: one.props.image ? "Regenerate Art" : "Generate Art",
+      run: () => document.getElementById("generate").click(),
+    });
+  }
+  if (one && (one.type === "image" || one.type === "panel") && one.props.image) {
+    items.push({
+      label: "Crop",
+      run: () => {
+        cropTarget = one.id;
+        stage.container().style.cursor = "crosshair";
+        toast("Drag a region on the image to crop. Esc cancels.");
+      },
+    });
+    if (one.props.crop) {
+      items.push({
+        label: "Reset Crop",
+        run: () => { delete one.props.crop; renderCanvas(); select(one.id); commit(); },
+      });
+    }
+  }
+  return items;
+}
+
+function contextItemsForCanvas() {
+  return [
+    { label: "Paste", accel: "Ctrl+V", disabled: !clipboard.length, run: pasteClipboard },
+    { label: "Select All", accel: "Ctrl+A", run: () => {
+      selectedIds = currentPage().layers.map((l) => l.id);
+      syncSelection();
+    } },
+    "-",
+    { label: "Place Image...", accel: "M", run: () => document.getElementById("image-file").click() },
+    { label: "Re-flow Panels", run: relayoutPage },
+    "-",
+    { label: "Add Page", run: () => document.getElementById("page-add").click() },
+    { label: "Fit Page", accel: "Ctrl+0", run: fitPage },
+  ];
+}
+
+stage.container().addEventListener("contextmenu", (event) => {
+  event.preventDefault();
+  const pointer = stage.getPointerPosition();
+  const hit = pointer ? stage.getIntersection(pointer) : null;
+  // walk up to the layer group that owns whatever was hit
+  let owner = hit;
+  while (owner && !nodes.has(owner.id())) owner = owner.getParent();
+  if (owner && nodes.has(owner.id())) {
+    if (!selectedIds.includes(owner.id())) select(owner.id());
+    showContextMenu(event.clientX, event.clientY, contextItemsForSelection());
+  } else {
+    showContextMenu(event.clientX, event.clientY, contextItemsForCanvas());
+  }
+});
+document.addEventListener("click", hideContextMenu);
+document.addEventListener("keydown", (event) => { if (event.key === "Escape") hideContextMenu(); });
+window.addEventListener("blur", hideContextMenu);
 
 // ----------------------------------------------------------- properties --
 function propField(label, inputHtml) { return `<label>${label}</label>${inputHtml}`; }
@@ -1753,8 +1951,203 @@ function placeDialogue(panelRect, entries) {
   return placed;
 }
 
+// ------------------------------------------------------ panel detection --
+// A whole-page render draws its own borders, so panel rectangles have to
+// be recovered from the pixels before lettering can be placed inside
+// them. Recursive XY-cut: split on wide bands of near-white gutter,
+// alternating axes, and stop when a region no longer splits.
+function detectPanels(image, pageW, pageH) {
+  const W = 220;
+  const H = Math.max(1, Math.round((image.naturalHeight / image.naturalWidth) * W));
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  context.drawImage(image, 0, 0, W, H);
+  const pixels = context.getImageData(0, 0, W, H).data;
+
+  const bright = (x, y) => {
+    const i = (y * W + x) * 4;
+    return (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
+  };
+  const GUTTER = 232;      // a gutter is paper, not art
+  const MIN_RUN = 2;       // ignore single-pixel noise lines
+  const MIN_SIDE = 26;     // a panel smaller than this is not a panel
+
+  // rows or columns that are gutter across the whole region
+  function emptyLines(box, axis) {
+    const lines = [];
+    const outer = axis === "y" ? [box.y, box.y + box.h] : [box.x, box.x + box.w];
+    const inner = axis === "y" ? [box.x, box.x + box.w] : [box.y, box.y + box.h];
+    for (let a = outer[0]; a < outer[1]; a += 1) {
+      let clear = true;
+      for (let b = inner[0]; b < inner[1]; b += 1) {
+        const value = axis === "y" ? bright(b, a) : bright(a, b);
+        if (value < GUTTER) { clear = false; break; }
+      }
+      if (clear) lines.push(a);
+    }
+    return lines;
+  }
+
+  function runs(lines) {
+    const out = [];
+    let start = null, prev = null;
+    lines.forEach((v) => {
+      if (start === null) { start = prev = v; return; }
+      if (v === prev + 1) { prev = v; return; }
+      out.push([start, prev]);
+      start = prev = v;
+    });
+    if (start !== null) out.push([start, prev]);
+    return out.filter(([a, b]) => b - a + 1 >= MIN_RUN);
+  }
+
+  const boxes = [];
+  function cut(box, axis, depth) {
+    if (depth > 6 || box.w < MIN_SIDE || box.h < MIN_SIDE) { boxes.push(box); return; }
+    const bands = runs(emptyLines(box, axis))
+      // a band touching the region edge is margin, not a separator
+      .filter(([a, b]) => a > (axis === "y" ? box.y : box.x)
+        && b < (axis === "y" ? box.y + box.h - 1 : box.x + box.w - 1));
+    if (!bands.length) {
+      if (depth === 0 || axis !== "y") {
+        // try the other axis once before giving up on this region
+        const other = axis === "y" ? "x" : "y";
+        const otherBands = runs(emptyLines(box, other)).filter(([a, b]) =>
+          a > (other === "y" ? box.y : box.x)
+          && b < (other === "y" ? box.y + box.h - 1 : box.x + box.w - 1));
+        if (otherBands.length) { cut(box, other, depth + 1); return; }
+      }
+      boxes.push(box);
+      return;
+    }
+    let cursor = axis === "y" ? box.y : box.x;
+    const limit = axis === "y" ? box.y + box.h : box.x + box.w;
+    const pieces = [];
+    bands.forEach(([a, b]) => {
+      if (a - cursor >= MIN_SIDE) pieces.push([cursor, a]);
+      cursor = b + 1;
+    });
+    if (limit - cursor >= MIN_SIDE) pieces.push([cursor, limit]);
+    if (pieces.length < 2) { boxes.push(box); return; }
+    pieces.forEach(([from, to]) => {
+      const child = axis === "y"
+        ? { x: box.x, y: from, w: box.w, h: to - from }
+        : { x: from, y: box.y, w: to - from, h: box.h };
+      cut(child, axis === "y" ? "x" : "y", depth + 1);
+    });
+  }
+  cut({ x: 0, y: 0, w: W, h: H }, "y", 0);
+
+  const scaleX = pageW / W;
+  const scaleY = pageH / H;
+  return boxes
+    .filter((b) => b.w >= MIN_SIDE && b.h >= MIN_SIDE)
+    .map((b) => ({
+      x: Math.round(b.x * scaleX), y: Math.round(b.y * scaleY),
+      w: Math.round(b.w * scaleX), h: Math.round(b.h * scaleY),
+    }))
+    .sort((a, b) => (a.y - b.y) || (doc.kind === "manga" ? b.x - a.x : a.x - b.x));
+}
+
 // The agent's page plan: lay the page out here, create the layers, then
 // render each panel's art with the engine picked in the top bar.
+// Whole-page mode: one render for the entire page. A single diffusion
+// sample cannot disagree with itself, so the page reads as one artist.
+// Panel rectangles are recovered from the result and the lettering is
+// dropped into them.
+async function applyAgentPage(panels, cast) {
+  const beats = panels.slice(0, 8);
+  const names = [...new Set(beats.flatMap((p) => p.cast || []))];
+  const actions = beats.map((p) => String(p.prompt || "").split(",")[0].trim())
+    .filter(Boolean).slice(0, 6).join(", ");
+  const setting = beats.map((p) => String(p.prompt || "").split(",").slice(1).join(","))
+    .join(",").split(",").map((t) => t.trim()).filter(Boolean);
+  const scenery = [...new Set(setting)].slice(0, 8).join(", ");
+
+  const pagePrompt = [
+    castTags(names),
+    `comic, multiple views, ${beats.length} panels, panel borders`,
+    actions, scenery, styleTags(),
+  ].filter(Boolean).join(", ");
+
+  currentPage().layers = [];
+  selectedIds = [];
+  const sheet = addLayer("image", { x: 0, y: 0, w: PAGE.w, h: PAGE.h });
+  sheet.name = "Page art";
+  sheet.locked = true;
+  sheet.props.prompt = pagePrompt;
+  sheet.props.isPage = true;
+
+  if (!engineReady()) {
+    renderCanvas();
+    showNoEngine(true);
+    toast("No image engine configured", true);
+    return;
+  }
+  setBusy("Rendering the page");
+  try {
+    const response = await fetch(`${SERVER}/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        engine: document.getElementById("engine").value,
+        prompt: pagePrompt, seed: doc.style.lockSeed ? panelSeed(sheet) : null,
+        width: 832, height: 1216, no_text: true,
+      }),
+    });
+    const result = await response.json();
+    if (!result.ok) throw new Error(result.error || "generation failed");
+    sheet.props.image = "data:image/png;base64," + result.image_base64;
+    sheet.props.engineUsed = result.engine;
+    sheet.props.seedUsed = result.seed;
+    renderCanvas();
+    await placeLetteringOnPage(sheet, beats);
+    checkpoint(`Agent page: ${beats.length} beats`);
+    toast(`Page rendered in ${(result.latency_ms / 1000).toFixed(1)}s`);
+  } catch (error) {
+    renderCanvas();
+    toast(error.message, true);
+  } finally {
+    setBusy(null);
+  }
+}
+
+// Lettering goes into detected panels in reading order; if the art has
+// no readable gutters the lines still land down the page in order so
+// nothing is lost and they can be dragged.
+function placeLetteringOnPage(sheet, beats) {
+  return new Promise((resolve) => {
+    const probe = new window.Image();
+    probe.onload = () => {
+      let boxes = [];
+      try { boxes = detectPanels(probe, PAGE.w, PAGE.h); } catch { boxes = []; }
+      const usable = boxes.filter((b) => b.w > PAGE.w * 0.12 && b.h > PAGE.h * 0.07);
+      const withText = beats.filter((b) => (b.dialogue || []).length);
+      withText.forEach((beat, index) => {
+        const box = usable[Math.min(index, usable.length - 1)] || {
+          x: Math.round(PAGE.w * 0.08),
+          y: Math.round(PAGE.h * (0.1 + 0.8 * (index / Math.max(withText.length, 1)))),
+          w: Math.round(PAGE.w * 0.84),
+          h: Math.round(PAGE.h * 0.18),
+        };
+        placeDialogue(box, beat.dialogue.slice(0, 3)).forEach((d) => {
+          const layer = addLayer(d.kind, { x: d.x, y: d.y, w: d.w });
+          layer.props.text = d.text;
+          if (d.fontSize) layer.props.fontSize = d.fontSize;
+        });
+      });
+      sheet.props.panelBoxes = usable;
+      select(null);
+      renderCanvas();
+      resolve(usable.length);
+    };
+    probe.onerror = () => resolve(0);
+    probe.src = sheet.props.image;
+  });
+}
+
 async function applyAgentPanels(panels, opts = {}) {
   const plan = panels.slice(0, 8).filter((p) => p && p.prompt);
   if (!plan.length) return;
@@ -2016,10 +2409,8 @@ async function sendChat() {
     setBusy(null);
     mergeCast(result.cast);
     if (Array.isArray(result.panels) && result.panels.length) {
-      // a page plan replaces the current page rather than piling layers
-      // on top of what is already there
-      const hasPanels = currentPage().layers.some((l) => l.type === "panel");
-      await applyAgentPanels(result.panels, { replacePage: hasPanels });
+      if (doc.style.pageMode !== "panels") await applyAgentPage(result.panels);
+      else await applyAgentPanels(result.panels, { replacePage: true });
     }
   } catch (error) {
     thinking.textContent = "Agent offline: " + error.message;

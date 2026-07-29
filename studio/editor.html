@@ -200,6 +200,9 @@
     .layer-row .mini { width: 22px; height: 20px; display: grid; place-items: center; color: var(--ink-3); border-radius: 4px; font-size: 11px; }
     .layer-row .mini:hover { color: var(--ink); background: var(--surface-3); }
     .layer-row .mini.engaged { color: var(--accent-glow); }
+    .layer-row.dragging { opacity: 0.4; }
+    .layer-row.drop-above { box-shadow: inset 0 2px 0 var(--accent-glow); }
+    .layer-row.drop-below { box-shadow: inset 0 -2px 0 var(--accent-glow); }
     .prop-grid { display: grid; grid-template-columns: 82px 1fr; gap: 8px 10px; align-items: center; }
     .prop-grid label { color: var(--ink-2); font-size: 11.5px; }
     .prop-grid input, .prop-grid select, .prop-grid textarea {
