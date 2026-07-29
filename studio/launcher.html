@@ -17,11 +17,15 @@
       display: flex; flex-direction: column; align-items: center; justify-content: center;
     }
     .drag-strip { position: fixed; top: 0; left: 0; right: 92px; height: 40px; -webkit-app-region: drag; }
-    #win-close {
-      position: fixed; top: 6px; right: 8px; width: 38px; height: 30px;
+    #win-close, #win-min {
+      position: fixed; top: 6px; width: 38px; height: 30px;
       background: transparent; border: none; color: var(--ink-3); border-radius: 6px; cursor: pointer;
     }
+    #win-close { right: 8px; }
+    #win-min { right: 50px; }
+    #win-min:hover { background: var(--surface-2); color: var(--ink); }
     #win-close:hover { background: #b3352c; color: #fff; }
+    input, textarea { user-select: text !important; -webkit-user-select: text !important; }
     .wordmark { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
     .wordmark svg { width: 24px; height: 24px; color: var(--ink); }
     .wordmark b { font-size: 19px; font-weight: 650; letter-spacing: -0.01em; }
@@ -62,6 +66,7 @@
 </head>
 <body>
   <div class="drag-strip"></div>
+  <button id="win-min" title="Minimize">–</button>
   <button id="win-close" title="Close">✕</button>
 
   <div class="wordmark">
@@ -104,6 +109,7 @@
     let mode = "image";
     let kind = "manga";
     document.getElementById("win-close").onclick = () => window.studio.win("close");
+    document.getElementById("win-min").onclick = () => window.studio.win("min");
 
     document.querySelectorAll(".tile").forEach((tile) => {
       tile.addEventListener("click", () => {

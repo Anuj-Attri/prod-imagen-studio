@@ -26,6 +26,9 @@
       --grain-opacity: 0.03;
     }
     * { box-sizing: border-box; margin: 0; user-select: none; }
+    input, textarea, select, .msg, .story-block, #chat-log, .prop-note {
+      user-select: text !important; -webkit-user-select: text !important;
+    }
     body {
       background: var(--bg); color: var(--ink); height: 100vh; overflow: hidden;
       font: 12.5px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
@@ -222,6 +225,7 @@
       <button id="save" class="quiet">Save</button>
       <button id="export" class="quiet">Export</button>
       <button id="theme-toggle" class="icon quiet" title="Light / dark">◐</button>
+      <button id="settings-btn" class="icon quiet" title="Settings">⚙</button>
     </div>
     <div id="winctl">
       <button id="win-min" title="Minimize">–</button>
@@ -296,6 +300,22 @@
     <span id="hint">V select · P panel · B balloon · C caption · T text · S sfx · R shape · Del delete</span>
   </div>
 
+  <div id="settings-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:70; place-items:center;">
+    <div style="width:420px; background:var(--surface); border:1px solid var(--hairline-strong); border-radius:12px; padding:20px;">
+      <h3 style="font-size:14px; margin-bottom:4px;">Settings</h3>
+      <p style="color:var(--ink-3); font-size:11.5px; margin-bottom:14px;">Keys are stored locally in server/keys.json and never leave your machine except to call the provider you configured.</p>
+      <div class="prop-grid">
+        <label>Anthropic</label><input id="key-anthropic" placeholder="sk-ant-... (agent + story)">
+        <label>Ideogram</label><input id="key-ideogram" placeholder="optional">
+        <label>OpenAI</label><input id="key-openai" placeholder="optional">
+        <label>BFL / FLUX</label><input id="key-bfl" placeholder="optional">
+      </div>
+      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:16px;">
+        <button id="settings-cancel">Cancel</button>
+        <button id="settings-save" class="primary">Save</button>
+      </div>
+    </div>
+  </div>
   <div id="toast"></div>
 
   <script src="node_modules/konva/konva.min.js"></script>

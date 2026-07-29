@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, Menu } = require("electron");
 const path = require("path");
 const fs = require("fs");
 
@@ -66,5 +66,21 @@ ipcMain.handle("export-png-dialog", async (_e, suggestedName, dataUrl) => {
   return result.filePath;
 });
 
-app.whenReady().then(createLauncher);
+ipcMain.handle("save-keys", async (_e, data) => {
+  const keysPath = path.join(__dirname, "..", "server", "keys.json");
+  fs.writeFileSync(keysPath, JSON.stringify(data, null, 2), "utf-8");
+  return true;
+});
+ipcMain.handle("load-keys", async () => {
+  const keysPath = path.join(__dirname, "..", "server", "keys.json");
+  try { return JSON.parse(fs.readFileSync(keysPath, "utf-8")); } catch { return {}; }
+});
+
+app.whenReady().then(() => {
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    { role: "editMenu" },
+    { role: "viewMenu" },
+  ]));
+  createLauncher();
+});
 app.on("window-all-closed", () => app.quit());

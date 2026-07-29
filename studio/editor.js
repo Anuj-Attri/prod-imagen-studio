@@ -802,6 +802,28 @@ function appendMsg(kind, text) {
   log.scrollTop = log.scrollHeight;
   return el;
 }
+const settingsModal = document.getElementById("settings-modal");
+document.getElementById("settings-btn").onclick = async () => {
+  const saved = await window.studio.loadKeys();
+  document.getElementById("key-anthropic").value = saved.anthropic || "";
+  document.getElementById("key-ideogram").value = saved.ideogram || "";
+  document.getElementById("key-openai").value = saved.openai || "";
+  document.getElementById("key-bfl").value = saved.bfl || "";
+  settingsModal.style.display = "grid";
+};
+document.getElementById("settings-cancel").onclick = () => { settingsModal.style.display = "none"; };
+document.getElementById("settings-save").onclick = async () => {
+  await window.studio.saveKeys({
+    anthropic: document.getElementById("key-anthropic").value.trim(),
+    ideogram: document.getElementById("key-ideogram").value.trim(),
+    openai: document.getElementById("key-openai").value.trim(),
+    bfl: document.getElementById("key-bfl").value.trim(),
+  });
+  settingsModal.style.display = "none";
+  toast("Saved. Engines refresh in a few seconds.");
+  loadEngines();
+};
+
 document.getElementById("chat-send").onclick = sendChat;
 document.getElementById("chat-input").addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendChat(); }
