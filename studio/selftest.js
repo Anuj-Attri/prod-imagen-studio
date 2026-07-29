@@ -823,6 +823,39 @@ check("an empty script builds nothing", async () => {
   return built === 0 && asked.length === 0;
 });
 
+// Asking for another version of a panel is the commonest thing anyone
+// does after looking at one.
+check("another take gives a different seed, the same panel gives the same", () => {
+  currentPage().layers = [];
+  doc.style.lockSeed = true;
+  doc.style.seedBase = 4242;
+  const layer = addLayer("panel", { x: 0, y: 0, w: 200, h: 150 });
+  const first = panelSeed(layer);
+  const again = panelSeed(layer);
+  if (first !== again) return "an untouched panel did not reproduce";
+  layer.props.take = 1;
+  const second = panelSeed(layer);
+  layer.props.take = 2;
+  const third = panelSeed(layer);
+  return second !== first && third !== second && third !== first
+    ? true : "takes repeated: " + [first, second, third].join(", ");
+});
+check("asking for another take moves the panel on", () => {
+  currentPage().layers = [];
+  const layer = addLayer("panel", { x: 0, y: 0, w: 200, h: 150 });
+  layer.props.image = "data:image/png;base64,x";
+  select(layer.id);
+  const before = panelSeed(layer);
+  showContextMenu(40, 40, contextItemsForSelection());
+  const entry = [...document.querySelectorAll(".menu-drop.show .menu-item")]
+    .find((el) => el.textContent.startsWith("Another take"));
+  if (!entry) return "no way to ask for another";
+  // the engine is not configured here, so only the intent is observed
+  entry.click();
+  hideContextMenu();
+  return findLayer(layer.id).props.take === 1 && panelSeed(layer) !== before;
+});
+
 // layout engine
 check("templates yield their panel count", () => {
   for (let n = 1; n <= 8; n += 1) if (pageLayout(n).length !== n) return "n=" + n;

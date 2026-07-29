@@ -25,6 +25,10 @@ its own paper size, default look and build recipe.
   panel, so a sequence reads as one artist rather than several. Presets
   carry a negative as well, which is what keeps a coloring page as flat
   line art instead of a painting.
+**Ask again for a different one.** Right click a panel for another take
+and it renders a fresh version; Regenerate exactly repeats the one you
+already have. Seeds stay locked otherwise, so reopening a finished
+chapter and re-rendering gives back what you had.
 - **Diagrams are drawn, not generated.** A blueprint returns components
   and connections, laid out as real boxes and arrows ordered by flow.
   Every box, arrow and label stays an editable layer.

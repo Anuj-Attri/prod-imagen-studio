@@ -1793,9 +1793,20 @@ function contextItemsForSelection() {
   }
   if (one && one.type === "panel") {
     items.push("-", {
-      label: one.props.image ? "Regenerate Art" : "Generate Art",
-      run: () => document.getElementById("generate").click(),
+      label: one.props.image ? "Another take" : "Generate Art",
+      run: () => {
+        // asking again means wanting something different, not the same
+        // picture back
+        if (one.props.image) one.props.take = (one.props.take || 0) + 1;
+        document.getElementById("generate").click();
+      },
     });
+    if (one.props.image) {
+      items.push({
+        label: "Regenerate exactly",
+        run: () => document.getElementById("generate").click(),
+      });
+    }
   }
   if (one && (one.type === "image" || one.type === "panel") && one.props.image) {
     items.push({
@@ -2590,7 +2601,10 @@ function panelSeed(layer) {
   if (!doc.style.lockSeed) return null;
   if (doc.style.seedBase == null) doc.style.seedBase = Math.floor(Math.random() * 1_000_000);
   const index = currentPage().layers.filter((l) => l.type === "panel").indexOf(layer);
-  return doc.style.seedBase + Math.max(index, 0) * 101 + pageIndex * 7919;
+  // The take counts. Locked seeds make an untouched page reproduce, but
+  // asking for another version of a panel has to actually give one.
+  const take = layer.props.take || 0;
+  return doc.style.seedBase + Math.max(index, 0) * 101 + pageIndex * 7919 + take * 104729;
 }
 
 // A render takes many seconds, and the page can change underneath it.
