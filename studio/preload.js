@@ -9,4 +9,7 @@ contextBridge.exposeInMainWorld("studio", {
   win: (action) => ipcRenderer.send("win", action),
   saveKeys: (data) => ipcRenderer.invoke("save-keys", data),
   loadKeys: () => ipcRenderer.invoke("load-keys"),
+  onMenu: (handler) => ipcRenderer.on("menu", (_e, action) => handler(action)),
+  newProjectWindow: () => ipcRenderer.invoke("new-project-window"),
+  openProjectFile: () => ipcRenderer.invoke("open-project-file"),
 });

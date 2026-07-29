@@ -39,6 +39,45 @@ let doc = project.document || {
   story: { chapter: "", overall: "", flags: [] },
 };
 doc.chat = doc.chat || [];
+// Style contract: every panel on the page is rendered with the same
+// look and the same appearance tags per character, which is what keeps
+// a sequence from reading as if a different artist drew each panel.
+const STYLE_PRESETS = {
+  manga: {
+    label: "Manga (black and white)",
+    tags: "monochrome, greyscale, manga, screentone, halftone shading, sharp ink linework, high contrast",
+  },
+  anime: {
+    label: "Anime (cel colour)",
+    tags: "anime style, cel shading, clean lineart, vibrant colors, flat colors",
+  },
+  manhwa: {
+    label: "Manhwa (webtoon colour)",
+    tags: "korean webtoon style, soft cel shading, glossy rendering, digital painting, vivid colors",
+  },
+  noir: {
+    label: "Noir ink",
+    tags: "monochrome, film noir lighting, heavy blacks, dramatic shadows, thick ink linework",
+  },
+  sketch: {
+    label: "Pencil sketch",
+    tags: "pencil sketch, rough lineart, monochrome, cross hatching, sketchbook",
+  },
+  watercolor: {
+    label: "Watercolour",
+    tags: "watercolor painting, soft washes, muted palette, painterly, textured paper",
+  },
+  retro: {
+    label: "Retro anime (80s)",
+    tags: "1980s anime style, retro cel animation, film grain, muted retro colors",
+  },
+};
+doc.style = doc.style || {
+  preset: doc.kind === "manga" ? "manga" : "anime",
+  extra: "",
+  lockSeed: true,
+};
+doc.cast = doc.cast || [];
 let savePath = project._path || null;
 let pageIndex = 0;
 let selectedIds = [];
@@ -99,6 +138,90 @@ function updateHistoryButtons() {
   document.getElementById("undo").disabled = historyIndex <= 0;
   document.getElementById("redo").disabled = historyIndex >= history.length - 1;
 }
+// ----------------------------------------------------------------- style --
+function mergeCast(incoming) {
+  if (!Array.isArray(incoming) || !incoming.length) return;
+  incoming.forEach((entry) => {
+    if (!entry || !entry.name || !entry.tags) return;
+    const existing = doc.cast.find(
+      (c) => c.name.toLowerCase() === String(entry.name).toLowerCase());
+    // an established character keeps its tags: that is the whole point
+    if (existing) return;
+    doc.cast.push({ id: uid(), name: String(entry.name), tags: String(entry.tags) });
+  });
+  renderStylePanel();
+}
+
+function renderStylePanel() {
+  const box = document.getElementById("style-body");
+  if (!box) return;
+  const options = Object.entries(STYLE_PRESETS).map(([id, preset]) =>
+    `<option value="${id}" ${doc.style.preset === id ? "selected" : ""}>${preset.label}</option>`).join("");
+  const preset = STYLE_PRESETS[doc.style.preset];
+  box.innerHTML = `
+    <div class="prop-grid">
+      <label>Art style</label><select id="style-preset">${options}</select>
+      <label>Extra tags</label><input id="style-extra" value="${escapeHtml(doc.style.extra || "")}" placeholder="optional, comma separated">
+      <label>Lock seeds</label><input id="style-lock" type="checkbox" ${doc.style.lockSeed ? "checked" : ""}>
+      <div class="prop-note">${escapeHtml(preset ? preset.tags : "")}</div>
+      <div class="prop-note">Applied to every panel on every page, so the
+        sequence reads as one artist. Locked seeds make a re-render of an
+        unchanged panel come back identical.</div>
+    </div>
+    <div class="dock-section-title">Cast</div>
+    <div id="cast-list"></div>
+    <button id="cast-add" style="width:100%;margin-top:8px">Add character</button>
+    <div class="prop-note" style="margin-top:8px">Appearance tags only:
+      hair, eyes, build, signature clothing, marks. No poses or settings.
+      These are prepended to every panel the character appears in.</div>`;
+  const list = document.getElementById("cast-list");
+  if (!doc.cast.length) {
+    list.innerHTML = '<div class="dock-empty" style="margin-top:8px">No characters yet.<br />The agent adds them as it writes,<br />or add one yourself.</div>';
+  }
+  doc.cast.forEach((member) => {
+    const row = document.createElement("div");
+    row.className = "cast-row";
+    row.innerHTML =
+      `<input class="cast-name" value="${escapeHtml(member.name)}" placeholder="Name">` +
+      `<button class="cast-del quiet" title="Remove">x</button>` +
+      `<textarea class="cast-tags" placeholder="1girl, long black hair, red kimono">${escapeHtml(member.tags)}</textarea>`;
+    row.querySelector(".cast-name").addEventListener("change", (e) => {
+      member.name = e.target.value.trim();
+      commit();
+    });
+    row.querySelector(".cast-tags").addEventListener("change", (e) => {
+      member.tags = e.target.value.trim();
+      commit();
+    });
+    row.querySelector(".cast-del").addEventListener("click", () => {
+      doc.cast = doc.cast.filter((c) => c.id !== member.id);
+      renderStylePanel();
+      commit();
+    });
+    list.appendChild(row);
+  });
+  document.getElementById("style-preset").addEventListener("change", (e) => {
+    doc.style.preset = e.target.value;
+    renderStylePanel();
+    renderProps();
+    commit(`Style: ${STYLE_PRESETS[e.target.value].label}`);
+  });
+  document.getElementById("style-extra").addEventListener("change", (e) => {
+    doc.style.extra = e.target.value.trim();
+    renderProps();
+    commit();
+  });
+  document.getElementById("style-lock").addEventListener("change", (e) => {
+    doc.style.lockSeed = e.target.checked;
+    commit();
+  });
+  document.getElementById("cast-add").addEventListener("click", () => {
+    doc.cast.push({ id: uid(), name: "New character", tags: "" });
+    renderStylePanel();
+    commit();
+  });
+}
+
 function renderHistory() {
   const list = document.getElementById("history-list");
   if (!list) return;
@@ -926,8 +1049,16 @@ function renderProps() {
   html += propField("Blend", `<select data-k="blend">${BLEND_MODES.map((m) =>
     `<option value="${m}" ${(layer.props.blend || "normal") === m ? "selected" : ""}>${m}</option>`).join("")}</select>`);
   if (layer.type === "panel") {
-    html += `<textarea data-k="prompt" placeholder="Describe this panel's art — subject, action, angle, style…">${escapeHtml(layer.props.prompt || "")}</textarea>`;
-    html += propField("Seed", `<input data-k="seed" type="number" value="${layer.props.seed ?? ""}" placeholder="random">`);
+    html += `<textarea data-k="prompt" placeholder="Shot tags: pose, action, setting, framing, lighting">${escapeHtml(layer.props.prompt || "")}</textarea>`;
+    const castOptions = doc.cast.map((c) => {
+      const on = (layer.props.cast || []).some((n) => n.toLowerCase() === c.name.toLowerCase());
+      return `<label class="cast-pick"><input type="checkbox" data-cast="${escapeHtml(c.name)}" ${on ? "checked" : ""}>${escapeHtml(c.name)}</label>`;
+    }).join("");
+    html += propField("In panel", castOptions
+      ? `<div class="cast-picks">${castOptions}</div>`
+      : `<span class="prop-note">No cast yet. Add characters in the Style tab.</span>`);
+    html += propField("Seed", `<input data-k="seed" type="number" value="${layer.props.seed ?? ""}" placeholder="${doc.style.lockSeed ? "locked" : "random"}">`);
+    html += `<div class="prop-note">Sent to the engine:<br />${escapeHtml(composePrompt(layer))}</div>`;
     if (layer.props.engineUsed) html += `<div class="prop-note">last render: ${layer.props.engineUsed} · seed ${layer.props.seedUsed}</div>`;
   }
   if (["balloon", "caption", "text", "sfx"].includes(layer.type)) {
@@ -996,6 +1127,17 @@ function renderProps() {
       else layer.props[key] = input.value;
       renderCanvas();
       select(layer.id);
+      commit();
+    });
+  });
+  body.querySelectorAll("[data-cast]").forEach((box) => {
+    box.addEventListener("change", () => {
+      const name = box.dataset.cast;
+      const current = layer.props.cast || [];
+      layer.props.cast = box.checked
+        ? [...current, name]
+        : current.filter((n) => n.toLowerCase() !== name.toLowerCase());
+      renderProps();
       commit();
     });
   });
@@ -1440,6 +1582,39 @@ function renderSize(layer) {
   };
 }
 
+function styleTags() {
+  const preset = STYLE_PRESETS[doc.style.preset];
+  return [preset ? preset.tags : "", doc.style.extra].filter(Boolean).join(", ");
+}
+
+function castTags(names) {
+  return (names || [])
+    .map((name) => doc.cast.find((c) => c.name.toLowerCase() === String(name).toLowerCase()))
+    .filter(Boolean)
+    .map((c) => c.tags)
+    .join(", ");
+}
+
+// Cast tags first, then the beat, then the project style. Identical
+// leading and trailing tags across panels are what hold a sequence
+// together visually.
+function composePrompt(layer) {
+  return [castTags(layer.props.cast), layer.props.prompt, styleTags()]
+    .map((part) => String(part || "").trim().replace(/^,|,$/g, "").trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
+// A locked base seed makes a page reproducible: re-rendering a panel
+// gives the same art unless its prompt changed.
+function panelSeed(layer) {
+  if (layer.props.seed != null) return layer.props.seed;
+  if (!doc.style.lockSeed) return null;
+  if (doc.style.seedBase == null) doc.style.seedBase = Math.floor(Math.random() * 1_000_000);
+  const index = currentPage().layers.filter((l) => l.type === "panel").indexOf(layer);
+  return doc.style.seedBase + Math.max(index, 0) * 101 + pageIndex * 7919;
+}
+
 async function generatePanel(layer) {
   if (!engineReady()) throw new Error("no image engine configured");
   const size = renderSize(layer);
@@ -1448,8 +1623,8 @@ async function generatePanel(layer) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       engine: document.getElementById("engine").value,
-      prompt: layer.props.prompt, seed: layer.props.seed,
-      width: size.width, height: size.height, no_text: true, style: doc.kind,
+      prompt: composePrompt(layer), seed: panelSeed(layer),
+      width: size.width, height: size.height, no_text: true,
     }),
   });
   const result = await response.json();
@@ -1593,6 +1768,7 @@ async function applyAgentPanels(panels, opts = {}) {
     const rect = rects[i];
     const layer = addLayer("panel", rect);
     layer.props.prompt = String(p.prompt).slice(0, 2000);
+    layer.props.cast = Array.isArray(p.cast) ? p.cast.map(String) : [];
     layer.name = `Panel ${i + 1}`;
     created.push(layer);
     placeDialogue(rect, Array.isArray(p.dialogue) ? p.dialogue.slice(0, 5) : [])
@@ -1830,7 +2006,8 @@ async function sendChat() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         messages: doc.chat.slice(-16), project: doc.name, kind: doc.kind,
-        page_size: { w: PAGE.w, h: PAGE.h }, pages,
+        art_style: (STYLE_PRESETS[doc.style.preset] || {}).label,
+        cast: doc.cast, pages,
       }),
     });
     const result = await response.json();
@@ -1838,6 +2015,7 @@ async function sendChat() {
     thinking.textContent = result.reply;
     doc.chat.push({ role: "assistant", content: result.reply });
     setBusy(null);
+    mergeCast(result.cast);
     if (Array.isArray(result.panels) && result.panels.length) {
       // a page plan replaces the current page rather than piling layers
       // on top of what is already there
@@ -1893,7 +2071,6 @@ document.getElementById("chat-input").addEventListener("keydown", (event) => {
 
 // ------------------------------------------------------------------ init --
 document.getElementById("project-title").textContent = doc.name;
-document.getElementById("project-kind").textContent = `${doc.kind} project`;
 document.title = `${doc.name} — prod-imagen studio`;
 document.querySelectorAll(".dock-tab").forEach((tab) => {
   tab.addEventListener("click", () => {
@@ -1904,6 +2081,122 @@ document.querySelectorAll(".dock-tab").forEach((tab) => {
   });
 });
 document.getElementById("relayout").onclick = relayoutPage;
+
+// ------------------------------------------------------------- menu bar --
+// The window is frameless, so the OS menu bar never shows; this is the
+// in-app equivalent. The native Menu still supplies the accelerators.
+const MENU_ACTIONS = {
+  "new-project": () => window.studio.newProjectWindow(),
+  "open-project": () => window.studio.openProjectFile(),
+  save: () => document.getElementById("save").click(),
+  "save-as": () => { savePath = null; document.getElementById("save").click(); },
+  export: () => document.getElementById("export").click(),
+  undo, redo, relayout: relayoutPage,
+  duplicate: duplicateSelected,
+  delete: deleteSelected,
+  "select-all": () => { selectedIds = currentPage().layers.map((l) => l.id); syncSelection(); },
+  "zoom-in": () => setZoom(zoom * 1.2),
+  "zoom-out": () => setZoom(zoom / 1.2),
+  "zoom-fit": fitPage,
+  theme: () => document.getElementById("theme-toggle").click(),
+  settings: () => document.getElementById("settings-btn").click(),
+  "page-next": () => document.getElementById("page-next").click(),
+  "page-prev": () => document.getElementById("page-prev").click(),
+  "page-add": () => document.getElementById("page-add").click(),
+  "analyze-story": () => document.getElementById("story-analyze").click(),
+};
+
+const MENUS = [
+  ["File", [
+    ["New Project...", "new-project", "Ctrl+N"],
+    ["Open Project...", "open-project", "Ctrl+O"],
+    ["-"],
+    ["Save", "save", "Ctrl+S"],
+    ["Save As...", "save-as", "Ctrl+Shift+S"],
+    ["Export Page as PNG...", "export", "Ctrl+E"],
+  ]],
+  ["Edit", [
+    ["Undo", "undo", "Ctrl+Z"],
+    ["Redo", "redo", "Ctrl+Y"],
+    ["-"],
+    ["Duplicate", "duplicate", "Ctrl+D"],
+    ["Select All", "select-all", "Ctrl+A"],
+    ["Delete", "delete", "Del"],
+  ]],
+  ["View", [
+    ["Zoom In", "zoom-in", "Ctrl+="],
+    ["Zoom Out", "zoom-out", "Ctrl+-"],
+    ["Fit Page", "zoom-fit", "Ctrl+0"],
+    ["-"],
+    ["Toggle Light / Dark", "theme"],
+    ["Settings...", "settings"],
+  ]],
+  ["Page", [
+    ["Previous Page", "page-prev", "Ctrl+Left"],
+    ["Next Page", "page-next", "Ctrl+Right"],
+    ["Add Page", "page-add"],
+    ["-"],
+    ["Re-flow Panels", "relayout"],
+    ["Analyze Story", "analyze-story"],
+  ]],
+];
+
+(() => {
+  const bar = document.getElementById("menubar");
+  const drop = document.createElement("div");
+  drop.className = "menu-drop";
+  document.body.appendChild(drop);
+  let openIndex = null;
+
+  const close = () => {
+    drop.classList.remove("show");
+    bar.querySelectorAll(".menu-top").forEach((t) => t.classList.remove("open"));
+    openIndex = null;
+  };
+  const open = (index, button) => {
+    const [, items] = MENUS[index];
+    drop.innerHTML = items.map(([label, action, accel]) => label === "-"
+      ? '<div class="menu-sep"></div>'
+      : `<div class="menu-item" data-action="${action}">${label}` +
+        `${accel ? `<span class="accel">${accel}</span>` : ""}</div>`).join("");
+    const rect = button.getBoundingClientRect();
+    drop.style.left = rect.left + "px";
+    drop.style.top = rect.bottom + 4 + "px";
+    drop.classList.add("show");
+    bar.querySelectorAll(".menu-top").forEach((t, i) => t.classList.toggle("open", i === index));
+    openIndex = index;
+    drop.querySelectorAll(".menu-item").forEach((item) => {
+      item.addEventListener("click", () => {
+        close();
+        const run = MENU_ACTIONS[item.dataset.action];
+        if (run) run();
+      });
+    });
+  };
+
+  MENUS.forEach(([label], index) => {
+    const button = document.createElement("div");
+    button.className = "menu-top";
+    button.textContent = label;
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (openIndex === index) close();
+      else open(index, button);
+    });
+    // once a menu is open, hovering the bar switches menus
+    button.addEventListener("mouseenter", () => {
+      if (openIndex !== null && openIndex !== index) open(index, button);
+    });
+    bar.appendChild(button);
+  });
+  document.addEventListener("click", close);
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape") close(); });
+})();
+
+if (window.studio.onMenu) window.studio.onMenu((action) => {
+  const run = MENU_ACTIONS[action];
+  if (run) run();
+});
 document.getElementById("no-engine-settings").onclick = () => {
   document.getElementById("no-engine").classList.remove("show");
   document.getElementById("settings-btn").click();
@@ -1914,6 +2207,7 @@ document.getElementById("no-engine-dismiss").onclick = () =>
 fitPage();
 renderCanvas();
 renderStory();
+renderStylePanel();
 loadEngines();
 pollHealth();
 commit("Opened");

@@ -1,9 +1,9 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
 
+const editorWindows = new Set();
 let launcherWindow = null;
-let editorWindow = null;
 
 const frameless = {
   frame: false,
@@ -16,19 +16,143 @@ const frameless = {
 };
 
 function createLauncher() {
+  if (launcherWindow) {
+    launcherWindow.focus();
+    return launcherWindow;
+  }
   launcherWindow = new BrowserWindow({ width: 980, height: 640, resizable: false, ...frameless });
   launcherWindow.loadFile(path.join(__dirname, "launcher.html"));
+  launcherWindow.on("closed", () => { launcherWindow = null; });
+  return launcherWindow;
 }
 
-function createEditor(project) {
-  editorWindow = new BrowserWindow({ width: 1600, height: 1000, minWidth: 1180, minHeight: 720, ...frameless });
-  editorWindow.loadFile(path.join(__dirname, "editor.html"), {
+function createEditor(project, opts = {}) {
+  const win = new BrowserWindow({
+    width: 1600, height: 1000, minWidth: 1180, minHeight: 720, ...frameless,
+  });
+  win.loadFile(path.join(__dirname, "editor.html"), {
     query: { project: JSON.stringify(project) },
   });
-  if (launcherWindow) { launcherWindow.close(); launcherWindow = null; }
+  editorWindows.add(win);
+  win.on("closed", () => editorWindows.delete(win));
+  // Opening from the launcher consumes it; File > New keeps it around.
+  if (launcherWindow && !opts.keepLauncher) {
+    launcherWindow.close();
+    launcherWindow = null;
+  }
+  return win;
+}
+
+function focused() {
+  return BrowserWindow.getFocusedWindow();
+}
+
+function toEditor(channel, payload) {
+  const win = focused();
+  if (win && editorWindows.has(win)) win.webContents.send(channel, payload);
+}
+
+async function openProjectFile() {
+  const result = await dialog.showOpenDialog({
+    filters: [{ name: "prod-imagen project", extensions: ["dimg"] }],
+    properties: ["openFile"],
+  });
+  if (result.canceled || !result.filePaths.length) return;
+  const filePath = result.filePaths[0];
+  try {
+    const project = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    project._path = filePath;
+    createEditor(project, { keepLauncher: true });
+  } catch (error) {
+    dialog.showErrorBox("Cannot open project", `${filePath}\n\n${error.message}`);
+  }
+}
+
+function buildMenu() {
+  const isMac = process.platform === "darwin";
+  const template = [
+    ...(isMac ? [{ role: "appMenu" }] : []),
+    {
+      label: "File",
+      submenu: [
+        {
+          label: "New Project...",
+          accelerator: "CmdOrCtrl+N",
+          click: () => createLauncher(),
+        },
+        {
+          label: "Open Project...",
+          accelerator: "CmdOrCtrl+O",
+          click: () => openProjectFile(),
+        },
+        { type: "separator" },
+        {
+          label: "Save",
+          accelerator: "CmdOrCtrl+S",
+          click: () => toEditor("menu", "save"),
+        },
+        {
+          label: "Save As...",
+          accelerator: "CmdOrCtrl+Shift+S",
+          click: () => toEditor("menu", "save-as"),
+        },
+        {
+          label: "Export Page as PNG...",
+          accelerator: "CmdOrCtrl+E",
+          click: () => toEditor("menu", "export"),
+        },
+        { type: "separator" },
+        { role: isMac ? "close" : "quit" },
+      ],
+    },
+    {
+      label: "Edit",
+      submenu: [
+        { label: "Undo", accelerator: "CmdOrCtrl+Z", click: () => toEditor("menu", "undo") },
+        { label: "Redo", accelerator: "CmdOrCtrl+Y", click: () => toEditor("menu", "redo") },
+        { type: "separator" },
+        { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" },
+      ],
+    },
+    {
+      label: "View",
+      submenu: [
+        { label: "Zoom In", accelerator: "CmdOrCtrl+Plus", click: () => toEditor("menu", "zoom-in") },
+        { label: "Zoom Out", accelerator: "CmdOrCtrl+-", click: () => toEditor("menu", "zoom-out") },
+        { label: "Fit Page", accelerator: "CmdOrCtrl+0", click: () => toEditor("menu", "zoom-fit") },
+        { type: "separator" },
+        { label: "Toggle Light / Dark", click: () => toEditor("menu", "theme") },
+        { type: "separator" },
+        { role: "reload" }, { role: "toggleDevTools" }, { role: "togglefullscreen" },
+      ],
+    },
+    {
+      label: "Page",
+      submenu: [
+        { label: "Next Page", accelerator: "CmdOrCtrl+Right", click: () => toEditor("menu", "page-next") },
+        { label: "Previous Page", accelerator: "CmdOrCtrl+Left", click: () => toEditor("menu", "page-prev") },
+        { label: "Add Page", click: () => toEditor("menu", "page-add") },
+        { type: "separator" },
+        { label: "Re-flow Panels", click: () => toEditor("menu", "relayout") },
+      ],
+    },
+    { role: "windowMenu" },
+    {
+      role: "help",
+      submenu: [
+        {
+          label: "Project Repository",
+          click: () => shell.openExternal("https://github.com/prod-imagen-studio"),
+        },
+      ],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
 ipcMain.handle("open-project", (_e, project) => { createEditor(project); return true; });
+ipcMain.handle("new-project-window", () => { createLauncher(); return true; });
+ipcMain.handle("open-project-file", async () => { await openProjectFile(); return true; });
 ipcMain.on("win", (event, action) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return;
@@ -83,10 +207,13 @@ app.whenReady().then(() => {
       autoUpdater.checkForUpdatesAndNotify();
     } catch (_) { /* updater unavailable in dev */ }
   }
-  Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { role: "editMenu" },
-    { role: "viewMenu" },
-  ]));
+  buildMenu();
   createLauncher();
 });
-app.on("window-all-closed", () => app.quit());
+
+app.on("activate", () => {
+  if (!BrowserWindow.getAllWindows().length) createLauncher();
+});
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") app.quit();
+});

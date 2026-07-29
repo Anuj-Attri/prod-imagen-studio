@@ -65,6 +65,28 @@
     #topbar button, #topbar select, #winctl { -webkit-app-region: no-drag; }
     #topbar .title { font-weight: 650; font-size: 13px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #topbar .crumb { color: var(--ink-3); font-size: 12px; }
+    /* ===== in-app menu bar (the window is frameless) ===== */
+    #menubar { display: flex; align-items: center; gap: 1px; -webkit-app-region: no-drag; }
+    .menu-top {
+      padding: 5px 9px; border-radius: 5px; cursor: default; color: var(--ink-2);
+      font-size: 12.5px; user-select: none;
+    }
+    .menu-top:hover, .menu-top.open { background: var(--surface-2); color: var(--ink); }
+    .menu-drop {
+      position: fixed; z-index: 65; display: none; flex-direction: column;
+      min-width: 220px; padding: 5px; border-radius: 9px;
+      background: var(--surface-2); border: 1px solid var(--hairline-strong);
+      box-shadow: var(--page-bloom); -webkit-app-region: no-drag;
+    }
+    .menu-drop.show { display: flex; }
+    .menu-item {
+      display: flex; align-items: center; gap: 14px; padding: 6px 10px;
+      border-radius: 6px; cursor: default; color: var(--ink-2); font-size: 12.5px;
+      white-space: nowrap;
+    }
+    .menu-item:hover { background: var(--surface-3); color: var(--ink); }
+    .menu-item .accel { margin-left: auto; color: var(--ink-3); font-size: 11px; }
+    .menu-sep { height: 1px; background: var(--hairline); margin: 4px 6px; }
     .tb-group { display: flex; align-items: center; gap: 6px; }
     .divider { width: 1px; height: 18px; background: var(--hairline); }
     button, select {
@@ -277,6 +299,25 @@
     }
     .hist-row .what { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .hist-row .when { color: var(--ink-3); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+    /* ===== style + cast ===== */
+    .cast-row {
+      display: grid; grid-template-columns: 1fr 24px; gap: 5px;
+      background: var(--surface-2); border: 1px solid var(--hairline);
+      border-radius: 7px; padding: 7px; margin-bottom: 6px;
+    }
+    .cast-row input, .cast-row textarea {
+      background: var(--bg); color: var(--ink); border: 1px solid var(--hairline);
+      border-radius: 5px; padding: 5px 7px; font: inherit; width: 100%; user-select: text;
+    }
+    .cast-row textarea { grid-column: 1 / -1; min-height: 52px; resize: vertical; line-height: 1.5; }
+    .cast-row input:focus, .cast-row textarea:focus { outline: none; border-color: var(--accent); }
+    .cast-row .cast-del { padding: 0; height: 26px; color: var(--ink-3); }
+    .cast-picks { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+    .cast-pick {
+      display: flex; align-items: center; gap: 5px; font-size: 11.5px;
+      color: var(--ink-2); cursor: pointer;
+    }
+    .cast-pick input { width: auto; }
     /* ===== contextual tool options bar ===== */
     #tool-options {
       position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
@@ -307,7 +348,7 @@
 <body>
   <div id="topbar">
     <span class="title" id="project-title">Untitled</span>
-    <span class="crumb" id="project-kind"></span>
+    <div id="menubar"></div>
     <span class="divider"></span>
     <div class="tb-group">
       <button class="icon quiet" id="page-prev" title="Previous page">‹</button>
@@ -371,9 +412,13 @@
     <div id="dock-tabs">
       <div class="dock-tab active" data-page="layers">Layers</div>
       <div class="dock-tab" data-page="props">Properties</div>
+      <div class="dock-tab" data-page="style">Style</div>
       <div class="dock-tab" data-page="history">History</div>
       <div class="dock-tab" data-page="story">Story</div>
       <div class="dock-tab" data-page="chat">Agent</div>
+    </div>
+    <div class="dock-page" data-page="style">
+      <div id="style-body"></div>
     </div>
     <div class="dock-page active" data-page="layers">
       <button id="relayout" style="width:100%;margin-bottom:10px">Re-flow panels</button>

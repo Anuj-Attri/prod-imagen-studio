@@ -81,10 +81,6 @@ GPU_MODEL = os.environ.get("LOCAL_IMAGE_MODEL", "cagliostrolab/animagine-xl-4.0"
 # Anime SDXL checkpoints are tag-driven and expect a trailing quality
 # block; without it the same prompt renders flat and often loses the
 # subject entirely.
-GPU_STYLE_TAGS = {
-    "manga": "monochrome, greyscale, manga, screentone, sharp linework",
-    "anime": "anime screencap style, vibrant colors",
-}
 GPU_QUALITY_TAGS = "masterpiece, best quality, very aesthetic, absurdres"
 GPU_NEGATIVE = os.environ.get(
     "LOCAL_IMAGE_NEGATIVE",
@@ -159,13 +155,10 @@ def snap64(value: int, lo: int = 512, hi: int = 1536) -> int:
     return max(lo, min(hi, round(value / 64) * 64))
 
 
-def gpu_prompt(prompt: str, style: str) -> str:
-    parts = [prompt.rstrip(" ,")]
-    tags = GPU_STYLE_TAGS.get(style)
-    if tags:
-        parts.append(tags)
-    parts.append(GPU_QUALITY_TAGS)
-    return ", ".join(parts)
+def gpu_prompt(prompt: str) -> str:
+    # The project supplies cast and style tags; only the checkpoint's own
+    # quality block belongs here.
+    return ", ".join([prompt.rstrip(" ,"), GPU_QUALITY_TAGS])
 
 
 def generate_gpu(prompt: str, seed: int, width: int, height: int) -> bytes:
@@ -463,8 +456,9 @@ AGENT_SYSTEM = (
     "canvas tool for manga, anime, posters and illustration. You BUILD "
     "pages; you never write essays. Answer with raw JSON only, no "
     "markdown, no code fences, in exactly this shape: "
-    '{"reply": "at most 15 words", "panels": [{"prompt": "art prompt: '
-    'subject, action, camera angle, lighting, style", "dialogue": '
+    '{"reply": "at most 15 words", "cast": [{"name": "Rin", "tags": '
+    '"1girl, long black hair, red kimono, scar on cheek"}], "panels": '
+    '[{"prompt": "art tags for the shot", "cast": ["Rin"], "dialogue": '
     '[{"kind": "balloon", "text": "SHORT line", "speaker": "left"}]}]}. '
     "The application places every panel on the page for you: never "
     "output coordinates, sizes, panel numbers or layout instructions. "
@@ -478,8 +472,18 @@ AGENT_SYSTEM = (
     "angle, wide shot, then lighting and mood tags. Example of the "
     "required style: 2boys, ninja, black bodysuit, katana, fighting "
     "stance, rooftop, night, rain, from below, dutch angle, dramatic "
-    "shadows. Keep a recurring character's appearance tags identical in "
-    "every panel so the character stays consistent. "
+    "shadows. "
+    "CAST. Every named character gets one entry in cast with permanent "
+    "appearance tags only: count tag, hair, eyes, build, signature "
+    "clothing, distinguishing marks. Never put pose, action, camera or "
+    "setting in cast tags. Reuse the exact same tags for a character "
+    "that already exists in the project context, and list the "
+    "characters appearing in each panel by name in that panel's cast "
+    "field. The application prepends those tags, so a panel prompt "
+    "must describe only pose, action, setting, framing and lighting, "
+    "never the character's appearance again. The project also applies "
+    "its own art style tags to every panel: never include style, "
+    "medium, colour or quality tags in a prompt. "
     "Each prompt describes ONLY what the art shows and must never ask "
     "for lettering, captions, speech balloons or any written words in "
     "the image; the words go in the dialogue list, which the app draws "
@@ -533,20 +537,24 @@ def parse_agent_json(text: str) -> dict:
             data = json.loads(cleaned[start:end + 1])
             if isinstance(data, dict) and "reply" in data:
                 panels = data.get("panels")
+                cast = data.get("cast")
                 return {
                     "reply": str(data["reply"]),
                     "panels": panels if isinstance(panels, list) else [],
+                    "cast": cast if isinstance(cast, list) else [],
                 }
         except Exception:
             pass
     # model ignored the contract: degrade to a plain text reply
-    return {"reply": text, "panels": []}
+    return {"reply": text, "panels": [], "cast": []}
 
 
 def agent_chat(payload: dict, current: dict) -> dict:
     context = json.dumps({
         "project": payload.get("project"),
         "kind": payload.get("kind"),
+        "art_style": payload.get("art_style"),
+        "existing_cast": payload.get("cast", []),
         "pages": payload.get("pages", []),
     })
     messages = [
@@ -575,11 +583,20 @@ def agent_chat(payload: dict, current: dict) -> dict:
             for d in (panel.get("dialogue") or [])
             if isinstance(d, dict) and d.get("text")
         ]
-        panels.append({"prompt": str(panel["prompt"])[:2000], "dialogue": dialogue[:5]})
+        panels.append({
+            "prompt": str(panel["prompt"])[:2000],
+            "cast": [str(n)[:60] for n in (panel.get("cast") or []) if n][:6],
+            "dialogue": dialogue[:5],
+        })
+    cast = [
+        {"name": str(c["name"])[:60], "tags": str(c.get("tags", ""))[:400]}
+        for c in result.get("cast", [])
+        if isinstance(c, dict) and c.get("name") and c.get("tags")
+    ][:12]
     reply = short_reply(result["reply"])
     if panels and (len(reply) > 160 or not reply):
         reply = f"Built a {len(panels)} panel page."
-    return {"reply": reply, "panels": panels}
+    return {"reply": reply, "panels": panels, "cast": cast}
 
 
 # -------------------------------------------------------------------- server --
@@ -666,11 +683,10 @@ class Handler(BaseHTTPRequestHandler):
         if not prompt:
             self._json(400, {"error": "prompt is required"})
             return
-        style = str(payload.get("style", ""))
         if engine == "local-gpu":
             # tag-driven checkpoint: the negative prompt already bars
             # lettering, so the prose no-text clause would only dilute it
-            prompt = gpu_prompt(prompt, style)
+            prompt = gpu_prompt(prompt)
         elif payload.get("no_text"):
             prompt = prompt + NO_TEXT_SUFFIX
         seed = payload.get("seed")
