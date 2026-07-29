@@ -6,6 +6,7 @@
    is what a build machine has and what a contributor can rely on:
 
      - the main process, preload, renderer and launcher parse
+     - nothing unexpected is tracked in the repository
      - the server compiles
      - the renderer self-test, which boots the real editor
      - the files it writes, read back and measured
@@ -19,6 +20,7 @@
      node studio/mutate.js           break the code, expect red
 */
 const { execFileSync, spawn } = require("child_process");
+const fs = require("fs");
 const http = require("http");
 const path = require("path");
 
@@ -77,6 +79,27 @@ function waitForServer(timeoutMs) {
    "filecheck.js", "pdfcheck.js", "mutate.js"].forEach((file) => {
     step(`${file} parses`, () => node(["--check", path.join("studio", file)]));
   });
+  // A repository is a denylist by default: everything not ignored is
+  // published. Naming the contents catches a stray file that no rule
+  // happened to anticipate.
+  step("nothing unexpected is tracked", () => {
+    const NEWLINE = String.fromCharCode(10);
+    const lines = (text) => text.split(NEWLINE).map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#"));
+    const listed = lines(fs.readFileSync(path.join(root, "MANIFEST"), "utf-8"));
+    const tracked = lines(execFileSync("git", ["ls-files"],
+      { cwd: root, encoding: "utf-8" }));
+    const added = tracked.filter((file) => !listed.includes(file));
+    const gone = listed.filter((file) => !tracked.includes(file));
+    if (added.length) {
+      throw new Error("tracked but absent from MANIFEST, add deliberately: "
+        + added.join(", "));
+    }
+    if (gone.length) {
+      throw new Error("listed in MANIFEST but no longer tracked: " + gone.join(", "));
+    }
+  });
+
   step("server compiles", () => python(["-m", "py_compile",
     path.join("server", "gen_server.py"), path.join("server", "probe.py")]));
 

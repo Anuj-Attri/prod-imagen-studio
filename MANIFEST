@@ -1,0 +1,32 @@
+# Every file this repository publishes. Checked by verify.js.
+# Adding a file here is a deliberate act: nothing reaches the
+# published repository, or an installer, by accident.
+.github/workflows/ci.yml
+.github/workflows/release.yml
+.gitignore
+LICENSE
+MANIFEST
+README.md
+build/icon.ico
+build/icon.png
+docker-compose.yml
+server/Dockerfile
+server/gen_server.py
+server/keys.example.json
+server/probe.py
+start-studio.cmd
+start-studio.sh
+studio/e2e.js
+studio/editor.html
+studio/editor.js
+studio/filecheck.js
+studio/launcher.html
+studio/launcher.js
+studio/main.js
+studio/mutate.js
+studio/package-lock.json
+studio/package.json
+studio/pdfcheck.js
+studio/preload.js
+studio/selftest.js
+verify.js
