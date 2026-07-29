@@ -2686,16 +2686,52 @@ function composePrompt(layer) {
     .join(", ");
 }
 
-// A locked base seed makes a page reproducible: re-rendering a panel
-// gives the same art unless its prompt changed.
+// A number from a name, the same on every machine and in every session.
+// Not for security, only for turning "Rin" into somewhere to start.
+function nameSeed(name) {
+  let hash = 2166136261;
+  const text = String(name || "").trim().toLowerCase();
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return Math.abs(hash) % 1_000_000;
+}
+
+/* A locked base seed makes a page reproducible, and who is in the panel
+   decides where that page starts.
+
+   The seed used to come from where a panel sat: its index on the page
+   and the page's place in the chapter. So the same character on page one
+   and page three started from unrelated points and the model rebuilt her
+   face from the tags each time, which is why a sequence looked like the
+   work of several artists. Tags fix the hair and the eyes; they do not
+   fix a face.
+
+   Deriving it from the cast instead means every panel with the same
+   people in it starts from the same place. The beat still differs, so
+   the pose and framing still differ; what stops moving is who they are.
+   Panels with nobody in them keep the old positional seed, since there
+   is no identity to hold. */
 function panelSeed(layer) {
   if (layer.props.seed != null) return layer.props.seed;
   if (!doc.style.lockSeed) return null;
   if (doc.style.seedBase == null) doc.style.seedBase = Math.floor(Math.random() * 1_000_000);
-  const index = currentPage().layers.filter((l) => l.type === "panel").indexOf(layer);
   // The take counts. Locked seeds make an untouched page reproduce, but
   // asking for another version of a panel has to actually give one.
   const take = layer.props.take || 0;
+
+  const cast = (layer.props.cast || [])
+    .map((name) => doc.cast.find((member) =>
+      member.name.toLowerCase() === String(name).toLowerCase()))
+    .filter(Boolean);
+  if (cast.length) {
+    // sorted, so the order the names were added cannot change the face
+    const who = cast.map((member) => nameSeed(member.name)).sort()
+      .reduce((sum, value) => sum + value, 0);
+    return doc.style.seedBase + who + take * 104729;
+  }
+  const index = currentPage().layers.filter((l) => l.type === "panel").indexOf(layer);
   return doc.style.seedBase + Math.max(index, 0) * 101 + pageIndex * 7919 + take * 104729;
 }
 

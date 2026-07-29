@@ -1747,6 +1747,71 @@ check("the style travels with a generation request, so the right model renders i
     : "the request carried style " + JSON.stringify(sent.style);
 });
 
+check("the same character starts from the same place on every page", () => {
+  resetForCheck("manga");
+  doc.style.lockSeed = true;
+  doc.style.seedBase = 1000;
+  doc.cast = [{ id: "c1", name: "Rin", tags: "1girl, long black hair" },
+              { id: "c2", name: "Kaito", tags: "1boy, short hair" }];
+
+  const first = addLayer("panel", { x: 0, y: 0, w: 300, h: 300 });
+  first.props.cast = ["Rin"];
+  const second = addLayer("panel", { x: 320, y: 0, w: 300, h: 300 });
+  second.props.cast = ["Rin"];
+  const other = addLayer("panel", { x: 0, y: 320, w: 300, h: 300 });
+  other.props.cast = ["Kaito"];
+
+  const a = panelSeed(first);
+  const b = panelSeed(second);
+  const c = panelSeed(other);
+  if (a !== b) return "two panels of the same person started from " + a + " and " + b;
+  if (a === c) return "two different people started from the same place";
+
+  // and a page later, still the same person
+  addPage(false);
+  const later = addLayer("panel", { x: 0, y: 0, w: 300, h: 300 });
+  later.props.cast = ["Rin"];
+  return panelSeed(later) === a ? true
+    : "the same person on a later page started from " + panelSeed(later);
+});
+
+check("the order names were added cannot change the art", () => {
+  resetForCheck("manga");
+  doc.style.lockSeed = true;
+  doc.style.seedBase = 1000;
+  doc.cast = [{ id: "c1", name: "Rin", tags: "1girl" },
+              { id: "c2", name: "Kaito", tags: "1boy" }];
+  const one = addLayer("panel", { x: 0, y: 0, w: 200, h: 200 });
+  one.props.cast = ["Rin", "Kaito"];
+  const two = addLayer("panel", { x: 220, y: 0, w: 200, h: 200 });
+  two.props.cast = ["Kaito", "Rin"];
+  return panelSeed(one) === panelSeed(two) ? true
+    : "the same two people in a different order gave different art";
+});
+
+check("asking for another take still gives a different one", () => {
+  resetForCheck("manga");
+  doc.style.lockSeed = true;
+  doc.style.seedBase = 1000;
+  doc.cast = [{ id: "c1", name: "Rin", tags: "1girl" }];
+  const panel = addLayer("panel", { x: 0, y: 0, w: 200, h: 200 });
+  panel.props.cast = ["Rin"];
+  const first = panelSeed(panel);
+  panel.props.take = 1;
+  return panelSeed(panel) !== first ? true
+    : "another take reproduced the same art";
+});
+
+check("a panel with nobody in it still gets its own art", () => {
+  resetForCheck("manga");
+  doc.style.lockSeed = true;
+  doc.style.seedBase = 1000;
+  const a = addLayer("panel", { x: 0, y: 0, w: 200, h: 200 });
+  const b = addLayer("panel", { x: 220, y: 0, w: 200, h: 200 });
+  return panelSeed(a) !== panelSeed(b) ? true
+    : "two empty panels would have produced identical art";
+});
+
 runChecks().then(() => {
   document.title = "SELFTEST " + JSON.stringify(window.__results);
 });
