@@ -717,6 +717,24 @@ check("solid fill stays solid", () => {
   return shape.fill() === "#00ff00" && !shape.fillLinearGradientColorStops();
 });
 
+// a chapter accumulates: new work must never destroy existing work
+check("second build moves to a new page", () => {
+  while (doc.pages.length > 1) doc.pages.pop();
+  goToPage(0);
+  currentPage().layers = [];
+  addLayer("text", { x: 20, y: 20 }).props.text = "existing work";
+  const pagesBefore = doc.pages.length;
+  pageForNewWork("test");
+  return doc.pages.length === pagesBefore + 1
+    && currentPage().layers.length === 0
+    && doc.pages[0].layers.length === 1;
+});
+check("empty page is reused rather than adding a blank one", () => {
+  const pagesBefore = doc.pages.length;
+  pageForNewWork("test");
+  return doc.pages.length === pagesBefore;
+});
+
 // rulers and guides
 check("rulers render page coordinates", () => {
   document.body.classList.add("rulers-on");

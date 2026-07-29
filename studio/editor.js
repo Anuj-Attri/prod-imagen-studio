@@ -118,8 +118,11 @@ const STYLE_PRESETS = {
   },
   poster: {
     label: "Poster art",
-    tags: "poster art, bold graphic composition, strong silhouette, dramatic lighting, "
-      + "limited palette, negative space for a title",
+    // "strong silhouette" and "negative space" pull the model towards
+    // abstraction and lose the subject; keep the subject foremost
+    tags: "poster illustration, clear focal subject, bold composition, "
+      + "dramatic lighting, limited palette, uncluttered background",
+    negative: "abstract, cluttered, busy background, text, letters",
   },
   card: {
     label: "Greeting card",
@@ -2550,8 +2553,7 @@ function columnsForGraph(nodes, edges) {
 }
 
 function buildBlueprint(nodes, edges) {
-  currentPage().layers = [];
-  selectedIds = [];
+  pageForNewWork("New diagram");
   setPageBackground("#0a1b2e");
 
   const columns = columnsForGraph(nodes, edges);
@@ -2624,8 +2626,7 @@ async function applyAgentArtwork(beats, layout) {
   const subject = beats.map((b) => String(b.prompt || "").trim()).filter(Boolean).join(", ");
   const prompt = [castTags(names), subject, styleTags()].filter(Boolean).join(", ");
 
-  currentPage().layers = [];
-  selectedIds = [];
+  pageForNewWork("New artwork");
 
   // A card keeps its lower third clear for the greeting.
   const artBox = layout === "card"
@@ -2733,6 +2734,18 @@ function placeArtworkText(layout, lines, artBox) {
 // sample cannot disagree with itself, so the page reads as one artist.
 // Panel rectangles are recovered from the result and the lettering is
 // dropped into them.
+// A second request must not destroy the first page: that is what makes
+// a chapter, or a multi page coloring book, possible at all.
+function pageForNewWork(label) {
+  if (currentPage().layers.length) {
+    addPage(false);
+    toast(`${label} on page ${pageIndex + 1}`);
+  }
+  currentPage().layers = [];
+  selectedIds = [];
+  return currentPage();
+}
+
 async function applyAgentPage(panels, cast) {
   const beats = panels.slice(0, 8);
   const names = [...new Set(beats.flatMap((p) => p.cast || []))];
@@ -2748,8 +2761,7 @@ async function applyAgentPage(panels, cast) {
     actions, scenery, styleTags(),
   ].filter(Boolean).join(", ");
 
-  currentPage().layers = [];
-  selectedIds = [];
+  pageForNewWork("New page");
   const sheet = addLayer("image", { x: 0, y: 0, w: PAGE.w, h: PAGE.h });
   sheet.name = "Page art";
   sheet.locked = true;
@@ -2828,10 +2840,7 @@ function placeLetteringOnPage(sheet, beats) {
 async function applyAgentPanels(panels, opts = {}) {
   const plan = panels.slice(0, 8).filter((p) => p && p.prompt);
   if (!plan.length) return;
-  if (opts.replacePage) {
-    currentPage().layers = [];
-    selectedIds = [];
-  }
+  if (opts.replacePage) pageForNewWork("New page");
   const rects = pageLayout(plan.length);
   const created = [];
   plan.forEach((p, i) => {
