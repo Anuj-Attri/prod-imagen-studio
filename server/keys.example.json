@@ -1,0 +1,6 @@
+{
+  "ideogram": "YOUR_IDEOGRAM_API_KEY",
+  "openai": "YOUR_OPENAI_API_KEY",
+  "bfl": "YOUR_BFL_API_KEY",
+  "anthropic": "YOUR_ANTHROPIC_API_KEY"
+}

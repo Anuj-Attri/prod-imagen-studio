@@ -1,0 +1,31 @@
+{
+  "name": "prod-imagen-studio",
+  "version": "0.3.0",
+  "description": "Layered canvas studio for AI-assisted visual stories: manga, anime, posters, diagrams",
+  "main": "main.js",
+  "author": "Anuj Attri",
+  "license": "SEE LICENSE IN ../LICENSE",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --publish never"
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "dependencies": {
+    "konva": "^9.3.16"
+  },
+  "build": {
+    "appId": "studio.prodimagen.app",
+    "productName": "prod-imagen studio",
+    "directories": { "output": "dist" },
+    "files": ["**/*", "!dist"],
+    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }] },
+    "nsis": { "oneClick": true, "deleteAppDataOnUninstall": false },
+    "mac": {
+      "target": [{ "target": "dmg", "arch": ["arm64", "x64"] }],
+      "category": "public.app-category.graphics-design"
+    }
+  }
+}

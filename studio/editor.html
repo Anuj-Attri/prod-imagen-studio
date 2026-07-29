@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>prod-imagen studio</title>
+  <style>
+    :root {
+      --bg: #151412; --surface: #1c1b18; --surface-2: #23221e; --surface-3: #282721;
+      --edge: #2e2c27; --edge-soft: #262521;
+      --ink: #edece8; --ink-2: #a5a39c; --ink-3: #74726b;
+      --accent: #d9442b; --accent-soft: rgba(217,68,43,0.15);
+      --good: #4d9d6a; --bad: #c65445;
+      --radius: 7px;
+    }
+    * { box-sizing: border-box; margin: 0; user-select: none; }
+    body {
+      background: var(--bg); color: var(--ink); height: 100vh; overflow: hidden;
+      font: 12.5px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+      display: grid;
+      grid-template-rows: 46px 1fr 27px;
+      grid-template-columns: 48px 1fr 296px;
+      grid-template-areas: "top top top" "tools canvas dock" "status status status";
+    }
+    /* ============ top bar ============ */
+    #topbar {
+      grid-area: top; display: flex; align-items: center; gap: 14px;
+      background: var(--surface); border-bottom: 1px solid var(--edge); padding: 0 14px;
+    }
+    .tb-group { display: flex; align-items: center; gap: 6px; }
+    #topbar .title {
+      font-weight: 650; font-size: 13px; max-width: 240px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    #topbar .crumb { color: var(--ink-3); font-size: 12px; }
+    .divider { width: 1px; height: 20px; background: var(--edge); }
+    button, select {
+      background: var(--surface-2); color: var(--ink); border: 1px solid var(--edge);
+      border-radius: var(--radius); padding: 6px 12px; font: inherit; cursor: pointer;
+      transition: border-color 100ms, background 100ms;
+    }
+    button:hover { border-color: var(--ink-3); }
+    button:active { background: var(--surface-3); }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+    button.primary:hover { filter: brightness(1.07); }
+    button.primary:disabled { opacity: 0.4; cursor: default; filter: none; }
+    button.quiet { background: transparent; border-color: transparent; color: var(--ink-2); }
+    button.quiet:hover { color: var(--ink); background: var(--surface-2); border-color: transparent; }
+    button.icon { width: 30px; height: 30px; padding: 0; display: grid; place-items: center; }
+    select { padding-right: 26px; }
+    select:focus, button:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 1px; }
+    #page-label { min-width: 78px; text-align: center; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+    /* ============ tool rail ============ */
+    #tools {
+      grid-area: tools; background: var(--surface); border-right: 1px solid var(--edge);
+      display: flex; flex-direction: column; align-items: center; gap: 3px; padding-top: 12px;
+    }
+    .tool {
+      width: 36px; height: 36px; border-radius: 8px; border: 1px solid transparent;
+      display: grid; place-items: center; cursor: pointer; color: var(--ink-2);
+      position: relative; transition: background 100ms, color 100ms;
+    }
+    .tool svg { width: 17px; height: 17px; }
+    .tool:hover { background: var(--surface-2); color: var(--ink); }
+    .tool.active { background: var(--accent-soft); border-color: var(--accent); color: #f2c7bd; }
+    .tool .tip {
+      position: absolute; left: 46px; top: 50%; transform: translateY(-50%);
+      background: var(--surface-3); border: 1px solid var(--edge); border-radius: 6px;
+      padding: 4px 9px; white-space: nowrap; font-size: 11.5px; color: var(--ink);
+      opacity: 0; pointer-events: none; transition: opacity 120ms; z-index: 40;
+    }
+    .tool:hover .tip { opacity: 1; }
+    /* ============ canvas ============ */
+    #canvas-wrap {
+      grid-area: canvas; overflow: hidden; position: relative;
+      background: radial-gradient(circle at 1px 1px, #201f1b 1px, transparent 0) 0 0 / 24px 24px, var(--bg);
+    }
+    #empty-hint {
+      position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%);
+      background: var(--surface); border: 1px solid var(--edge); border-radius: 12px;
+      padding: 22px 28px; text-align: center; z-index: 10; pointer-events: none;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+    }
+    #empty-hint h3 { font-size: 14px; font-weight: 650; margin-bottom: 8px; }
+    #empty-hint p { color: var(--ink-2); font-size: 12.5px; line-height: 1.7; }
+    #empty-hint kbd {
+      background: var(--surface-3); border: 1px solid var(--edge); border-bottom-width: 2px;
+      border-radius: 5px; padding: 1px 7px; font: 600 11px "Segoe UI", sans-serif; color: var(--ink);
+    }
+    #zoom-controls {
+      position: absolute; right: 14px; bottom: 12px; z-index: 10;
+      display: flex; align-items: center; gap: 4px;
+      background: var(--surface); border: 1px solid var(--edge); border-radius: 8px; padding: 3px;
+    }
+    #zoom-controls button { border: none; background: transparent; color: var(--ink-2); width: 28px; height: 26px; padding: 0; }
+    #zoom-controls button:hover { color: var(--ink); background: var(--surface-2); }
+    #zoom-pct { min-width: 44px; text-align: center; color: var(--ink-2); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+    /* ============ right dock ============ */
+    #dock { grid-area: dock; background: var(--surface); border-left: 1px solid var(--edge); display: flex; flex-direction: column; min-height: 0; }
+    #dock-tabs { display: flex; border-bottom: 1px solid var(--edge); padding: 0 6px; }
+    .dock-tab {
+      flex: 1; text-align: center; padding: 10px 0 9px; font-size: 11px; letter-spacing: 0.05em;
+      text-transform: uppercase; color: var(--ink-3); cursor: pointer;
+      border-bottom: 2px solid transparent; transition: color 100ms;
+    }
+    .dock-tab:hover { color: var(--ink-2); }
+    .dock-tab.active { color: var(--ink); border-bottom-color: var(--accent); }
+    .dock-page { display: none; flex: 1; min-height: 0; overflow-y: auto; padding: 12px; }
+    .dock-page.active { display: flex; flex-direction: column; }
+    .dock-empty { color: var(--ink-3); font-size: 12px; text-align: center; margin-top: 26px; line-height: 1.7; }
+    .dock-section-title { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-3); margin: 12px 0 6px; }
+    /* layers */
+    #layer-list { display: flex; flex-direction: column; gap: 2px; }
+    .layer-row {
+      display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 7px;
+      border: 1px solid transparent; cursor: pointer; font-size: 12.5px;
+    }
+    .layer-row:hover { background: var(--surface-2); }
+    .layer-row.sel { background: var(--accent-soft); border-color: var(--accent); }
+    .layer-row .glyph { width: 18px; height: 18px; color: var(--ink-2); flex: none; }
+    .layer-row .glyph svg { width: 100%; height: 100%; }
+    .layer-row .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .layer-row .mini {
+      width: 22px; height: 20px; display: grid; place-items: center;
+      color: var(--ink-3); border-radius: 4px; font-size: 11px;
+    }
+    .layer-row .mini:hover { color: var(--ink); background: var(--edge); }
+    .layer-row .mini.engaged { color: var(--accent); }
+    /* properties */
+    .prop-grid { display: grid; grid-template-columns: 82px 1fr; gap: 8px 10px; align-items: center; }
+    .prop-grid label { color: var(--ink-2); font-size: 11.5px; }
+    .prop-grid input, .prop-grid select, .prop-grid textarea {
+      background: var(--bg); color: var(--ink); border: 1px solid var(--edge); border-radius: 6px;
+      padding: 6px 8px; font: inherit; width: 100%; user-select: text;
+    }
+    .prop-grid textarea { grid-column: 1 / -1; min-height: 104px; resize: vertical; line-height: 1.5; }
+    .prop-grid input:focus, .prop-grid textarea:focus { outline: none; border-color: var(--accent); }
+    .prop-note { grid-column: 1 / -1; color: var(--ink-3); font-size: 11px; line-height: 1.55; }
+    /* story */
+    .story-block {
+      background: var(--surface-2); border: 1px solid var(--edge-soft); border-radius: 8px;
+      padding: 10px 12px; margin-bottom: 8px; font-size: 12px; color: var(--ink-2);
+      user-select: text; line-height: 1.6;
+    }
+    .story-block b { color: var(--ink); }
+    .flag { border-left: 3px solid #e0a63f; }
+    .flag.bad { border-left-color: var(--bad); }
+    /* ============ status bar ============ */
+    #status {
+      grid-area: status; display: flex; align-items: center; gap: 16px; padding: 0 14px;
+      background: var(--surface); border-top: 1px solid var(--edge); font-size: 11.5px; color: var(--ink-3);
+    }
+    #status .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #4a4a55; margin-right: 6px; }
+    #status .eng.ok .dot { background: var(--good); }
+    #toast {
+      position: fixed; bottom: 42px; left: 50%; transform: translateX(-50%);
+      background: var(--surface-3); border: 1px solid var(--edge); border-radius: 8px;
+      padding: 9px 18px; font-size: 12.5px; opacity: 0; transition: opacity 180ms;
+      pointer-events: none; z-index: 90; box-shadow: 0 8px 30px rgba(0,0,0,0.45);
+    }
+    #toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div id="topbar">
+    <span class="title" id="project-title">Untitled</span>
+    <span class="crumb" id="project-kind"></span>
+    <span class="divider"></span>
+    <div class="tb-group">
+      <button class="icon quiet" id="page-prev" title="Previous page">‹</button>
+      <span id="page-label">Page 1/1</span>
+      <button class="icon quiet" id="page-next" title="Next page">›</button>
+      <button class="icon quiet" id="page-add" title="Add page">+</button>
+    </div>
+    <div class="spacer" style="flex:1"></div>
+    <div class="tb-group">
+      <select id="engine" title="Generation engine"></select>
+      <button id="generate" class="primary" disabled>Generate</button>
+    </div>
+    <span class="divider"></span>
+    <div class="tb-group">
+      <button id="save" class="quiet">Save</button>
+      <button id="export" class="quiet">Export PNG</button>
+    </div>
+  </div>
+
+  <div id="tools"></div>
+
+  <div id="canvas-wrap">
+    <div id="empty-hint">
+      <h3>Blank page</h3>
+      <p>
+        Press <kbd>P</kbd> and drag to frame an AI panel &nbsp;·&nbsp; <kbd>B</kbd> for a speech balloon<br />
+        <kbd>C</kbd> caption &nbsp;·&nbsp; <kbd>T</kbd> title text &nbsp;·&nbsp; <kbd>Ctrl</kbd>+scroll to zoom
+      </p>
+    </div>
+    <div id="zoom-controls">
+      <button id="zoom-out" title="Zoom out">−</button>
+      <span id="zoom-pct">100%</span>
+      <button id="zoom-in" title="Zoom in">+</button>
+      <button id="zoom-fit" title="Fit page">⊡</button>
+    </div>
+  </div>
+
+  <div id="dock">
+    <div id="dock-tabs">
+      <div class="dock-tab active" data-page="layers">Layers</div>
+      <div class="dock-tab" data-page="props">Properties</div>
+      <div class="dock-tab" data-page="story">Story</div>
+    </div>
+    <div class="dock-page active" data-page="layers">
+      <div id="layer-list"></div>
+      <div class="dock-empty" id="layers-empty">Nothing on this page yet.<br />Elements you add appear here:<br />drag to reorder, click to select.</div>
+    </div>
+    <div class="dock-page" data-page="props">
+      <div id="props-body"><div class="dock-empty">Select an element to edit<br />its properties.</div></div>
+    </div>
+    <div class="dock-page" data-page="story">
+      <button id="story-analyze" style="width:100%;margin-bottom:10px">Analyze story so far</button>
+      <div class="dock-section-title">This chapter</div>
+      <div id="story-chapter" class="story-block">No analysis yet.</div>
+      <div class="dock-section-title">Whole story</div>
+      <div id="story-overall" class="story-block">No analysis yet.</div>
+      <div class="dock-section-title">Consistency flags</div>
+      <div id="story-flags"></div>
+    </div>
+  </div>
+
+  <div id="status">
+    <span class="eng" id="eng-local"><span class="dot"></span>local draft</span>
+    <span class="eng" id="eng-pod"><span class="dot"></span>prod-imagen pod</span>
+    <span class="eng" id="eng-api"><span class="dot"></span>hosted APIs</span>
+    <span class="eng" id="eng-story"><span class="dot"></span>story engine</span>
+    <span style="flex:1"></span>
+    <span id="hint">V select · P panel · B balloon · C caption · T text · S sfx · R shape · Del delete</span>
+  </div>
+
+  <div id="toast"></div>
+
+  <script src="node_modules/konva/konva.min.js"></script>
+  <script src="editor.js"></script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Syntax-check renderer and main process
+        run: |
+          node --check studio/main.js
+          node --check studio/preload.js
+          node --check studio/editor.js
+      - name: Compile server
+        run: python -m py_compile server/gen_server.py
+      - name: Secret hygiene
+        run: |
+          if grep -RInE "(sk-[A-Za-z0-9]{20,}|rpa_[A-Za-z0-9]{20,}|api_key\s*[:=]\s*['\"][A-Za-z0-9]{16,})" \
+            --exclude-dir=node_modules --exclude-dir=.git .; then
+            echo "Potential secret committed" && exit 1
+          fi
