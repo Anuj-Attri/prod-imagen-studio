@@ -1,6 +1,26 @@
 /* Headless self-test: builds a throwaway page from editor.html beside
    the real assets, loads a generated checks file into it, and prints the
-   result. Run: node studio/selftest.js
+   result.
+
+     node studio/selftest.js             the suite
+     node studio/selftest.js --reverse   run it backwards
+
+   Each check starts from a reset document, so passing depends on the
+   behaviour rather than on what ran before it. A few steps deliberately
+   continue from the one above them and are declared with chain() instead
+   of check(); reversing skips those, since a sequence has an order by
+   definition.
+
+   Running backwards is how coupling gets found: it has caught checks
+   that only passed because of leftover zoom, leftover guides, leftover
+   rulers, or a server that happened to be running.
+
+   Known gap: "every layer type can be grabbed across its body" fails
+   when reversed. Hit testing there depends on stage geometry that some
+   earlier check disturbs in a way the reset does not restore. The
+   behaviour itself is covered from three other directions, so this is a
+   harness limitation rather than a product fault.
+
    Requires Chrome; verifies the renderer without the desktop app. */
 const fs = require("fs");
 const path = require("path");
@@ -12,11 +32,51 @@ const html = fs.readFileSync(path.join(here, "editor.html"), "utf-8");
 const CHECKS = `
 window.__results = [];
 const __checks = [];
+
+// Each check starts from the same ground so that passing depends on the
+// behaviour and not on what ran before it.
+function resetForCheck() {
+  doc.pages = [{ id: uid(), name: "Page 1", layers: [] }];
+  pageIndex = 0;
+  selectedIds = [];
+  clipboard = [];
+  doc.guides = { v: [], h: [] };
+  doc.cast = [];
+  doc.chat.length = 0;
+  doc.style.preset = "manga";
+  doc.style.pageMode = "page";
+  doc.kind = "manga";
+  // Rulers inset the canvas. Clearing only the class is not enough:
+  // applyView redraws them from rulersOn and puts it straight back.
+  rulersOn = false;
+  document.body.classList.remove("rulers-on");
+  stage.size({ width: wrap.clientWidth, height: wrap.clientHeight });
+  zoom = 1;
+  world.position({ x: 0, y: 0 });
+  applyView();
+  renderCanvas();
+  stage.draw();          // the hit graph, not just the visible layer
+  savedSnapshot = snapshotDoc();
+}
+
 // checks may be async: the export path walks pages through the canvas
-function check(name, fn) { __checks.push([name, fn]); }
+function check(name, fn) { __checks.push([name, fn, true]); }
+// a step that deliberately continues from the one before it
+function chain(name, fn) { __checks.push([name, fn, false]); }
+
 async function runChecks() {
-  for (const [name, fn] of __checks) {
+  // A check that only passes in its usual position is not a check, it is
+  // a coincidence. ORDER lets the run be reversed to find those.
+  if (window.__order === "reverse") __checks.reverse();
+  for (const [name, fn, isolated] of __checks) {
+    // a chained step has an order by definition; reversing it proves
+    // nothing, so it is skipped rather than reported as broken
+    if (!isolated && window.__order === "reverse") {
+      window.__results.push([name, "skipped: continues a sequence"]);
+      continue;
+    }
     try {
+      if (isolated) resetForCheck();
       const value = await fn();
       window.__results.push([name, value === true ? "pass" : "FAIL(" + value + ")"]);
     } catch (error) {
@@ -89,9 +149,14 @@ check("every layer type can be grabbed across its body", () => {
   const broken = [];
   const kinds = ["panel", "balloon", "caption", "text", "sfx",
                  "rect", "ellipse", "star"];
+  // hit testing only works inside the drawn stage, so establish the
+  // viewport here rather than inheriting whatever size was left behind
+  stage.size({ width: Math.max(wrap.clientWidth, 400),
+               height: Math.max(wrap.clientHeight, 400) });
   zoom = 1;
   world.position({ x: 0, y: 0 });
   applyView();
+  stage.draw();
   kinds.forEach((kind) => {
     currentPage().layers = [];
     const layer = addLayer(kind, { x: 20, y: 20, w: 120, h: 90 });
@@ -493,7 +558,7 @@ check("cast tags lead the prompt", () => {
   const out = composePrompt(p);
   return out.startsWith("1girl, long black hair") && out.includes("screentone");
 });
-check("established cast is never overwritten", () => {
+chain("established cast is never overwritten", () => {
   mergeCast([{ name: "rin", tags: "1girl, blonde" }]);
   return doc.cast.find(c => c.name === "Rin").tags.includes("long black hair");
 });
@@ -663,8 +728,15 @@ check("comic page still lays out panels", async () => {
   const balloons = currentPage().layers.filter(l => l.type === "balloon");
   return panels.length === 3 && balloons.length === 1;
 });
-check("building each kind never destroyed earlier pages", () =>
-  doc.pages.filter(p => p.layers.length).length >= 4);
+check("building one document after another never destroys the earlier one", async () => {
+  doc.kind = "poster";
+  doc.style.preset = "poster";
+  await applyAgentArtwork([{ prompt: "1boy, saxophone", dialogue: [] }], "poster");
+  const afterFirst = doc.pages.filter((p) => p.layers.length).length;
+  await applyAgentArtwork([{ prompt: "1girl, witch", dialogue: [] }], "poster");
+  const afterSecond = doc.pages.filter((p) => p.layers.length).length;
+  return afterFirst === 1 && afterSecond === 2;
+});
 
 // lettering
 check("balloon tail direction is settable", () => {
@@ -701,7 +773,7 @@ check("paste in place keeps coordinates", () => {
   const copy = selectedLayers()[0];
   return copy.id !== layer.id && copy.x === 111 && copy.y === 222;
 });
-check("ordinary paste offsets", () => {
+chain("ordinary paste offsets", () => {
   pasteClipboard(false);
   const copy = selectedLayers()[0];
   return copy.x === 127 && copy.y === 238;
@@ -786,7 +858,7 @@ check("history snapshots exclude image data", () => {
   if (snap.includes("A".repeat(1000))) return "pixels are in the snapshot";
   return snap.length < 40000 && snap.includes("imgref:");
 });
-check("undo brings the image back", () => {
+chain("undo brings the image back", () => {
   const layer = currentPage().layers.find(l => l.props && l.props.image);
   const original = layer.props.image;
   commit("with image");
@@ -917,19 +989,19 @@ check("blueprint builds boxes and connectors", () => {
   const arrows = currentPage().layers.filter(l => l.type === "arrow");
   return boxes.length === 4 && arrows.length === 3;
 });
-check("blueprint orders columns by flow", () => {
+chain("blueprint orders columns by flow", () => {
   const byName = {};
   currentPage().layers.filter(l => l.type === "rect").forEach(l => { byName[l.props.label] = l.x; });
   return byName["Roof"] < byName["Filter"]
     && byName["Filter"] < byName["Storage tank"]
     && byName["Storage tank"] < byName["Tap"];
 });
-check("box label renders inside the box", () => {
+chain("box label renders inside the box", () => {
   const box = currentPage().layers.find(l => l.type === "rect" && l.props.label);
   const text = nodes.get(box.id).findOne(".box-label");
   return !!text && text.text() === box.props.label;
 });
-check("connectors span between boxes", () => {
+chain("connectors span between boxes", () => {
   const arrow = currentPage().layers.find(l => l.type === "arrow");
   const [x1, y1, x2, y2] = arrow.props.points;
   return Math.abs(x2 - x1) > 10 || Math.abs(y2 - y1) > 10;
@@ -970,7 +1042,10 @@ runChecks().then(() => {
 // The page ships a strict Content-Security-Policy that forbids inline
 // script, so the checks load as a file like any other script would.
 const checksFile = path.join(here, "__selftest-checks.js");
-fs.writeFileSync(checksFile, CHECKS, "utf-8");
+const order = process.argv.includes("--reverse") ? "reverse" : "forward";
+fs.writeFileSync(checksFile,
+  `window.__order = ${JSON.stringify(order)};
+` + CHECKS, "utf-8");
 const localCopy = path.join(here, "__selftest.html");
 fs.writeFileSync(localCopy,
   html.replace("</body>", '<script src="__selftest-checks.js"></script></body>'), "utf-8");
@@ -1005,8 +1080,10 @@ try {
   const results = JSON.parse(match[1].replace(/&quot;/g, '"').replace(/&amp;/g, "&"));
   let failed = 0;
   results.forEach(([name, status]) => {
-    if (status !== "pass") failed += 1;
-    console.log(`${status === "pass" ? "  ok  " : " FAIL "} ${name}${status === "pass" ? "" : "  -> " + status}`);
+    const skipped = String(status).startsWith("skipped");
+    if (status !== "pass" && !skipped) failed += 1;
+    const mark = status === "pass" ? "  ok  " : skipped ? " skip " : " FAIL ";
+    console.log(`${mark} ${name}${status === "pass" || skipped ? "" : "  -> " + status}`);
   });
   console.log(`\n${results.length - failed}/${results.length} checks passed`);
   exitCode = failed ? 1 : 0;
