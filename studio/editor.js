@@ -210,6 +210,30 @@ function normalizeDocument(document_) {
         + `Using ${STYLE_PRESETS[fallback].label}.`, true), 0);
     }
   }
+  // The cast, the story and the guides are reached into without asking,
+  // so each has to be the shape the code expects rather than merely
+  // present.
+  if (!Array.isArray(document_.cast)) document_.cast = [];
+  document_.cast = document_.cast.filter((member) =>
+    member && typeof member === "object" && typeof member.name === "string");
+  document_.cast.forEach((member) => {
+    if (!member.id) member.id = uid();
+    if (typeof member.tags !== "string") member.tags = "";
+  });
+
+  if (!document_.story || typeof document_.story !== "object") {
+    document_.story = { chapter: "", overall: "", flags: [] };
+  }
+  if (!Array.isArray(document_.story.flags)) document_.story.flags = [];
+
+  const guides = document_.guides;
+  document_.guides = {
+    v: Array.isArray(guides && guides.v) ? guides.v.filter(Number.isFinite) : [],
+    h: Array.isArray(guides && guides.h) ? guides.h.filter(Number.isFinite) : [],
+  };
+
+  if (!Array.isArray(document_.chat)) document_.chat = [];
+
   if (!Array.isArray(document_.pages) || !document_.pages.length) {
     document_.pages = [{ id: uid(), name: "Page 1", layers: [] }];
   }

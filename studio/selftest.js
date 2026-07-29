@@ -1001,6 +1001,55 @@ check("a document with no style at all still renders", () => {
   return true;
 });
 
+// The repair has only ever been tested on damaged pages and layers. The
+// document also carries a cast, a story and a set of guides, and code
+// reaches into all three without asking.
+check("a cast of the wrong type does not break composing a prompt", () => {
+  currentPage().layers = [];
+  doc.cast = "not a list at all";
+  normalizeDocument(doc);
+  const panel = addLayer("panel", { x: 0, y: 0, w: 100, h: 100 });
+  panel.props.prompt = "1girl, standing";
+  panel.props.cast = ["Rin"];
+  return typeof composePrompt(panel) === "string";
+});
+check("a document with no story still shows the story tab", () => {
+  delete doc.story;
+  normalizeDocument(doc);
+  renderStory();
+  return document.getElementById("story-chapter").textContent.length > 0;
+});
+check("guides of the wrong shape do not break dragging", () => {
+  currentPage().layers = [];
+  doc.guides = { v: "nonsense", h: null };
+  normalizeDocument(doc);
+  const layer = addLayer("rect", { x: 50, y: 50, w: 40, h: 40 });
+  select(layer.id);
+  snapDrag(nodes.get(layer.id));
+  return true;
+});
+
+check("a good document is left untouched by the repair", () => {
+  doc.cast = [{ id: "c1", name: "Rin", tags: "1girl, long black hair" }];
+  doc.story = { chapter: "A duel", overall: "Two rivals", flags: [{ title: "x", detail: "y" }] };
+  doc.guides = { v: [120, 400], h: [88] };
+  doc.chat = [{ role: "user", content: "hello" }];
+  const before = JSON.stringify({ c: doc.cast, s: doc.story, g: doc.guides, h: doc.chat });
+  normalizeDocument(doc);
+  return JSON.stringify({ c: doc.cast, s: doc.story, g: doc.guides, h: doc.chat }) === before;
+});
+check("half a cast entry is dropped rather than half kept", () => {
+  doc.cast = [
+    { id: "c1", name: "Rin", tags: "1girl" },
+    { name: 42 },
+    null,
+    { id: "c3", name: "Oni" },
+  ];
+  normalizeDocument(doc);
+  // the nameless and the malformed go; the one missing only its tags stays
+  return doc.cast.length === 2 && doc.cast[1].name === "Oni" && doc.cast[1].tags === "";
+});
+
 // layout engine
 check("templates yield their panel count", () => {
   for (let n = 1; n <= 8; n += 1) if (pageLayout(n).length !== n) return "n=" + n;
