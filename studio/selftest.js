@@ -191,6 +191,25 @@ check("empty page is reused rather than adding a blank one", () => {
   return doc.pages.length === pagesBefore;
 });
 
+check("layer list shows art thumbnails", () => {
+  const px = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  addLayer("image", { x: 0, y: 0, w: 50, h: 50 }, { image: px });
+  renderLayerList();
+  return document.querySelectorAll("#layer-list .glyph.art img").length === 1;
+});
+check("layer rename commits", () => {
+  const layer = addLayer("rect", { x: 0, y: 700, w: 30, h: 30 });
+  renderLayerList();
+  const row = [...document.querySelectorAll("#layer-list .layer-row")]
+    .find(r => r.querySelector(".name").textContent === layer.name);
+  row.querySelector(".name").dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+  const input = document.querySelector("#layer-list input.rename");
+  if (!input) return "no input";
+  input.value = "Renamed layer";
+  input.dispatchEvent(new Event("blur"));
+  return findLayer(layer.id).name === "Renamed layer";
+});
+
 // rulers and guides
 check("rulers render page coordinates", () => {
   document.body.classList.add("rulers-on");

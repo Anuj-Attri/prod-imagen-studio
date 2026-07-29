@@ -200,6 +200,16 @@
     .layer-row.sel { background: var(--surface-2); border-color: var(--hairline-strong); }
     .layer-row .glyph { width: 18px; height: 18px; color: var(--ink-2); flex: none; }
     .layer-row .glyph svg { width: 100%; height: 100%; }
+    .layer-row .glyph.art {
+      border: 1px solid var(--hairline-strong); border-radius: 3px; overflow: hidden;
+      background: var(--surface-3);
+    }
+    .layer-row .glyph.art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .layer-row input.rename {
+      flex: 1; min-width: 0; background: var(--bg); color: var(--ink);
+      border: 1px solid var(--accent); border-radius: 4px; padding: 2px 5px;
+      font: inherit; user-select: text;
+    }
     .layer-row .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .layer-row .mini { width: 22px; height: 20px; display: grid; place-items: center; color: var(--ink-3); border-radius: 4px; font-size: 11px; }
     .layer-row .mini:hover { color: var(--ink); background: var(--surface-3); }
@@ -733,6 +743,25 @@ check("empty page is reused rather than adding a blank one", () => {
   const pagesBefore = doc.pages.length;
   pageForNewWork("test");
   return doc.pages.length === pagesBefore;
+});
+
+check("layer list shows art thumbnails", () => {
+  const px = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  addLayer("image", { x: 0, y: 0, w: 50, h: 50 }, { image: px });
+  renderLayerList();
+  return document.querySelectorAll("#layer-list .glyph.art img").length === 1;
+});
+check("layer rename commits", () => {
+  const layer = addLayer("rect", { x: 0, y: 700, w: 30, h: 30 });
+  renderLayerList();
+  const row = [...document.querySelectorAll("#layer-list .layer-row")]
+    .find(r => r.querySelector(".name").textContent === layer.name);
+  row.querySelector(".name").dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+  const input = document.querySelector("#layer-list input.rename");
+  if (!input) return "no input";
+  input.value = "Renamed layer";
+  input.dispatchEvent(new Event("blur"));
+  return findLayer(layer.id).name === "Renamed layer";
 });
 
 // rulers and guides

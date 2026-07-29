@@ -1350,15 +1350,39 @@ function renderLayerList() {
     const row = document.createElement("div");
     row.className = "layer-row" + (selectedIds.includes(layer.id) ? " sel" : "");
     row.draggable = true;
-    row.innerHTML =
-      `<span class="glyph">${ICONS[layer.type] || ICONS.rect}</span>` +
-      `<span class="name">${escapeHtml(layer.name)}</span>` +
+    // a thumbnail of the actual art beats a type glyph for finding a layer
+    const thumb = layer.props && layer.props.image
+      ? `<span class="glyph art"><img src="${layer.props.image}" alt=""></span>`
+      : `<span class="glyph">${ICONS[layer.type] || ICONS.rect}</span>`;
+    row.innerHTML = thumb +
+      `<span class="name" title="Double click to rename">${escapeHtml(layer.name)}</span>` +
       `<span class="mini vis ${layer.visible ? "" : "engaged"}" title="show or hide">${layer.visible ? "●" : "○"}</span>` +
       `<span class="mini lock ${layer.locked ? "engaged" : ""}" title="lock">${layer.locked ? "L" : "U"}</span>`;
     row.addEventListener("click", (event) => {
       if (event.target.classList.contains("vis")) { layer.visible = !layer.visible; renderCanvas(); commit(); return; }
       if (event.target.classList.contains("lock")) { layer.locked = !layer.locked; renderCanvas(); commit(); return; }
       select(layer.id, { toggle: event.shiftKey || event.ctrlKey });
+    });
+    row.querySelector(".name").addEventListener("dblclick", (event) => {
+      event.stopPropagation();
+      const cell = event.target;
+      const input = document.createElement("input");
+      input.className = "rename";
+      input.value = layer.name;
+      cell.replaceWith(input);
+      input.focus();
+      input.select();
+      const finish = (keep) => {
+        if (keep && input.value.trim()) layer.name = input.value.trim();
+        renderLayerList();
+        if (keep) commit("Rename layer");
+      };
+      input.addEventListener("blur", () => finish(true));
+      input.addEventListener("keydown", (keyEvent) => {
+        keyEvent.stopPropagation();
+        if (keyEvent.key === "Enter") input.blur();
+        if (keyEvent.key === "Escape") { input.value = ""; finish(false); }
+      });
     });
     row.addEventListener("contextmenu", (event) => {
       event.preventDefault();
