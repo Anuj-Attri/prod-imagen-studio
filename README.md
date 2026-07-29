@@ -135,6 +135,42 @@ is cached afterwards.
 Set `LOCAL_IMAGE_MODEL` to use a different checkpoint. The launcher
 prefers this interpreter automatically when it exists.
 
+### Setting up on a second machine
+
+Keys are deliberately not in the repository, so a fresh clone has none.
+After cloning:
+
+    cp server/keys.example.json server/keys.json
+
+Then fill in the keys you actually have; every one is optional and the
+application says which features each unlocks. `server/keys.json` is
+gitignored, and the build fails if it ever appears in a commit.
+
+### Choosing the language model
+
+The writing and planning steps run through
+[OpenRouter](https://openrouter.ai), which fronts several hundred models
+from different vendors behind a single key. Put it in `server/keys.json`
+as `openrouter`, or export `OPENROUTER_API_KEY`.
+
+Which model runs which step is decided in `server/routing.py`. Steps are
+grouped into tiers, and the catalogue is read from the provider at run
+time, so a model retired upstream costs a fallback rather than an
+outage. To check a choice instead of taking it on trust:
+
+    python -m server.bench --step dialogue --input a-scene.txt
+
+That runs the same step across the candidates for its tier and reports
+what each one produced, what it cost per hundred calls, and how long it
+took. Answers are labelled A, B, C with the names withheld until
+`--reveal` is passed, because knowing which vendor wrote which answer
+moves a judgement more than most people expect.
+
+Quoted price per token is not the same as what a call costs. One model
+listed at two dollars per million spent eighteen thousand tokens on a
+single scene and cost four times as much per call as one listed at
+twenty-five. Order candidates by measured cost, not by the sticker.
+
 ### Optional: hosted art engines
 
 Put keys in `server/keys.json` (see `server/keys.example.json`) or

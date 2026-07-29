@@ -1,4 +1,5 @@
 {
+  "openrouter": "YOUR_OPENROUTER_API_KEY",
   "ideogram": "YOUR_IDEOGRAM_API_KEY",
   "openai": "YOUR_OPENAI_API_KEY",
   "bfl": "YOUR_BFL_API_KEY",
