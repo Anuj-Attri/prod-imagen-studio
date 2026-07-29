@@ -777,6 +777,17 @@ check("a broken image does not stall an export", async () => {
   return seconds < 4 ? true : "waited " + seconds.toFixed(1) + "s";
 });
 
+check("every document type has a real paper size", () => {
+  const wrong = [];
+  Object.entries(PAGE_SIZES).forEach(([kind, size]) => {
+    if (!size.inW || !size.inH) { wrong.push(kind + ": none"); return; }
+    const dpi = (size.w * 2) / size.inW;      // export captures at twice
+    if (dpi < 150) wrong.push(kind + ": " + Math.round(dpi) + "dpi");
+    if (size.inW > 20 || size.inH > 25) wrong.push(kind + ": bigger than A2");
+  });
+  return wrong.length === 0 ? true : wrong.join(", ");
+});
+
 // layout engine
 check("templates yield their panel count", () => {
   for (let n = 1; n <= 8; n += 1) if (pageLayout(n).length !== n) return "n=" + n;
@@ -1309,10 +1320,15 @@ check("the pdf carries every page at the document's own size", async () => {
 
   if (!sent) return "nothing was handed to the writer";
   if (sent.images.length !== 3) return "carried " + sent.images.length + " pages of 3";
-  if (sent.widthPx !== PAGE.w || sent.heightPx !== PAGE.h) {
-    return "sized " + sent.widthPx + "x" + sent.heightPx
-      + " rather than " + PAGE.w + "x" + PAGE.h;
+  // the sheet must measure what the paper measures, not what the canvas
+  // happens to be in pixels
+  if (Math.abs(sent.widthIn - PAGE.inW) > 0.01
+      || Math.abs(sent.heightIn - PAGE.inH) > 0.01) {
+    return "sized " + sent.widthIn + "x" + sent.heightIn
+      + "in rather than " + PAGE.inW + "x" + PAGE.inH;
   }
+  // and that has to be a plausible sheet of paper, not a canvas guess
+  if (sent.widthIn > 20 || sent.heightIn > 25) return "absurd sheet size";
   return sent.images.every((png) => String(png).startsWith("data:image/png"))
     ? true : "a page was not a rendered image";
 });

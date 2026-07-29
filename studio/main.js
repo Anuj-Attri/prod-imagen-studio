@@ -264,21 +264,20 @@ ipcMain.handle("export-png-dialog", async (_e, suggestedName, dataUrl) => {
 // A chapter is delivered as one document. The pages are already
 // rasterised by the renderer; this lays them out one per sheet in an
 // offscreen window and prints that to PDF at the page's real size.
-ipcMain.handle("export-pdf", async (_e, { suggestedName, widthPx, heightPx, images }) => {
+ipcMain.handle("export-pdf", async (_e, { suggestedName, widthIn, heightIn, images }) => {
   const result = await dialog.showSaveDialog({
     defaultPath: suggestedName,
     filters: [{ name: "PDF document", extensions: ["pdf"] }],
   });
   if (result.canceled) return null;
 
-  const inches = (px) => px / 96;
   const body = images.map((src) =>
     `<div class="sheet"><img src="${src}"></div>`).join("");
   const html = `<!doctype html><meta charset="utf-8"><style>
-    @page { size: ${inches(widthPx)}in ${inches(heightPx)}in; margin: 0; }
+    @page { size: ${widthIn}in ${heightIn}in; margin: 0; }
     html, body { margin: 0; padding: 0; background: #fff; }
     .sheet {
-      width: ${inches(widthPx)}in; height: ${inches(heightPx)}in;
+      width: ${widthIn}in; height: ${heightIn}in;
       page-break-after: always; overflow: hidden;
     }
     .sheet:last-child { page-break-after: auto; }
@@ -290,7 +289,7 @@ ipcMain.handle("export-pdf", async (_e, { suggestedName, widthPx, heightPx, imag
     await sheet.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
     const pdf = await sheet.webContents.printToPDF({
       printBackground: true,
-      pageSize: { width: inches(widthPx) * 25400, height: inches(heightPx) * 25400 },
+      pageSize: { width: widthIn * 25400, height: heightIn * 25400 },
       margins: { marginType: "none" },
     });
     await fs.promises.writeFile(result.filePath, pdf);

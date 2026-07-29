@@ -55,15 +55,19 @@ const project = parseProject();
 // Every document type is the same layered page underneath. What differs
 // is the paper size, the default look, and what "build me a page" means.
 const PAGE_SIZES = {
-  manga: { w: 900, h: 1273 },      // B5 proportions
-  anime: { w: 1024, h: 1024 },
-  coloring: { w: 1000, h: 1294 },  // Letter
-  poster: { w: 900, h: 1200 },
-  card: { w: 1050, h: 750 },       // folded card, front panel
-  blueprint: { w: 1400, h: 990 },  // A3 landscape
-  diagram: { w: 1100, h: 800 },
-  free: { w: 1000, h: 1000 },
+  // Pixels are the working size on screen; inches are what the paper
+  // actually measures when it is printed. Treating one as the other put
+  // every document out by between a fifth and nearly double.
+  manga: { w: 900, h: 1273, inW: 6.93, inH: 9.84, paper: "B5" },
+  anime: { w: 1024, h: 1024, inW: 8, inH: 8, paper: "square" },
+  coloring: { w: 1000, h: 1294, inW: 8.5, inH: 11, paper: "US Letter" },
+  poster: { w: 900, h: 1200, inW: 11.69, inH: 16.54, paper: "A3" },
+  card: { w: 1050, h: 750, inW: 5.83, inH: 4.13, paper: "A6 landscape" },
+  blueprint: { w: 1400, h: 990, inW: 16.54, inH: 11.69, paper: "A3 landscape" },
+  diagram: { w: 1100, h: 800, inW: 11.69, inH: 8.27, paper: "A4 landscape" },
+  free: { w: 1000, h: 1000, inW: 10.42, inH: 10.42, paper: "free" },
 };
+
 const PAGE = PAGE_SIZES[project.kind] || PAGE_SIZES.free;
 
 const KIND_RECIPES = {
@@ -3383,11 +3387,18 @@ document.getElementById("export-pdf").onclick = async () => {
   try {
     await forEachPageSnapshot((dataUrl) => { images.push(dataUrl); });
     setBusy("Writing PDF");
+    // the sheet is described in inches; the image on it supplies the
+    // resolution, which the two times capture makes generous
+    const widthIn = PAGE.inW || PAGE.w / 96;
+    const heightIn = PAGE.inH || PAGE.h / 96;
     const saved = await window.studio.exportPdf({
       suggestedName: `${doc.name}.pdf`,
-      widthPx: PAGE.w, heightPx: PAGE.h, images,
+      widthIn, heightIn, images,
     });
-    if (saved) toast(`Exported ${images.length} pages to ${saved}`);
+    if (saved) {
+      const dpi = Math.round((PAGE.w * 2) / widthIn);
+      toast(`Exported ${images.length} pages, ${PAGE.paper || "custom"} at ${dpi} dpi`);
+    }
   } catch (error) {
     toast(error.message, true);
   } finally {
