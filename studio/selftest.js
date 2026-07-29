@@ -733,6 +733,50 @@ check("a render still lands when its panel is merely deselected", async () => {
   return String(findLayer(layer.id).props.image).startsWith("data:image");
 });
 
+// Exporting is a snapshot of what is drawn. Art that has not finished
+// decoding is not drawn, so the page would be written out with holes.
+check("exporting waits for art that has not decoded yet", async () => {
+  currentPage().layers = [];
+  // a colour never seen before, so nothing can serve it from the cache
+  const canvas = document.createElement("canvas");
+  canvas.width = 200; canvas.height = 200;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "rgb(" + (Math.floor(Math.random() * 200) + 30) + ",20,90)";
+  context.fillRect(0, 0, 200, 200);
+  const fresh = canvas.toDataURL("image/png");
+
+  // several pages, each with art nothing has decoded before
+  const made = [];
+  for (let i = 0; i < 3; i += 1) {
+    if (i) addPage(false);
+    context.fillStyle = "rgb(" + (30 + i * 40) + ",20," + (90 + i * 20) + ")";
+    context.fillRect(0, 0, 200, 200);
+    made.push(addLayer("image", { x: 0, y: 0, w: 200, h: 200 },
+                       { image: canvas.toDataURL("image/png") }));
+  }
+  goToPage(0);
+  // exporting immediately, exactly as someone would after generating
+  const drawnAt = [];
+  await forEachPageSnapshot(() => {
+    drawnAt.push(currentPage().layers.filter((l) =>
+      l.props.image && nodes.get(l.id).findOne(".art")).length);
+  });
+  return drawnAt.every((n) => n === 1)
+    ? true : "pages captured with art drawn: " + drawnAt.join(",");
+});
+
+check("a broken image does not stall an export", async () => {
+  currentPage().layers = [];
+  const layer = addLayer("image", { x: 0, y: 0, w: 100, h: 100 },
+                         { image: "data:image/png;base64,not-an-image" });
+  renderCanvas();
+  const started = Date.now();
+  await forEachPageSnapshot(() => {});
+  const seconds = (Date.now() - started) / 1000;
+  // it must give up rather than wait out the whole timeout
+  return seconds < 4 ? true : "waited " + seconds.toFixed(1) + "s";
+});
+
 // layout engine
 check("templates yield their panel count", () => {
   for (let n = 1; n <= 8; n += 1) if (pageLayout(n).length !== n) return "n=" + n;

@@ -3287,6 +3287,25 @@ function renderPageToDataUrl() {
   return url;
 }
 
+// A snapshot captures what is drawn, so art still decoding would be
+// written out as a hole. Wait for it rather than guessing at a delay.
+function waitForArt(timeoutMs) {
+  const undrawn = () => currentPage().layers.filter((layer) => {
+    if (!layer.props || !layer.props.image || layer.props.imageBroken) return false;
+    const node = nodes.get(layer.id);
+    return !node || !node.findOne(".art");
+  }).length;
+  const deadline = Date.now() + (timeoutMs || 5000);
+  return new Promise((resolve) => {
+    const tick = () => {
+      // give up rather than hang: a broken image must not stop an export
+      if (!undrawn() || Date.now() > deadline) resolve(undrawn());
+      else setTimeout(tick, 40);
+    };
+    tick();
+  });
+}
+
 // Walk every page through the canvas, snapshotting each, then put the
 // document back exactly as the user left it.
 async function forEachPageSnapshot(onPage) {
@@ -3297,8 +3316,8 @@ async function forEachPageSnapshot(onPage) {
       pageIndex = i;
       selectedIds = [];
       renderCanvas();
-      // let queued image decodes finish before snapshotting
-      await new Promise((resolve) => setTimeout(resolve, 140));
+      const missing = await waitForArt();
+      if (missing) toast(`Page ${i + 1}: ${missing} image(s) not ready`, true);
       setBusy(`Rendering page ${i + 1} of ${doc.pages.length}`);
       await onPage(renderPageToDataUrl(), i);
     }
