@@ -19,6 +19,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -180,24 +181,52 @@ def local_models(cfg: dict) -> list:
         return []
 
 
+def strip_reasoning(text: str) -> str:
+    # Reasoning models (Qwen3, DeepSeek-R1) emit chain-of-thought in
+    # <think> tags; the user must never see it. Handles complete blocks
+    # and orphaned open/close tags from truncated or pre-stripped output.
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    if "</think>" in text:
+        text = text.rsplit("</think>", 1)[1]
+    if "<think>" in text:
+        text = text.split("<think>", 1)[0]
+    return text.strip()
+
+
 def llm_chat(current: dict, system: str, messages: list, max_tokens: int = 900) -> str:
     if local_llm_reachable(current):
         cfg = llm_config(current)
         available = local_models(cfg)
         model = cfg["model"]
         if available and model not in available:
-            model = available[0]
+            # closest usable substitute: same family first (qwen3:8b ->
+            # qwen3:14b), never an embedding model
+            chat_capable = [m for m in available if "embed" not in m.lower()]
+            family = model.split(":")[0].lower()
+            same_family = [m for m in chat_capable if m.lower().startswith(family)]
+            model = (same_family or chat_capable or available)[0]
+        if "qwen3" in model.lower():
+            system = system + " /no_think"
         try:
             result = http_json(
                 cfg["url"] + "/chat/completions",
                 {
                     "model": model,
-                    "max_tokens": max_tokens,
+                    # local is free; headroom so reasoning cannot eat the reply
+                    "max_tokens": max(max_tokens, 4000),
                     "messages": [{"role": "system", "content": system}] + messages,
                 },
                 {}, timeout=180,
             )
-            return result["choices"][0]["message"]["content"].strip()
+            raw = result["choices"][0]["message"]["content"]
+            reply = strip_reasoning(raw)
+            if not reply:
+                raise RuntimeError(
+                    "The local model spent its whole reply on internal "
+                    "reasoning. Send the message again, or switch to a "
+                    "non-thinking model in Settings."
+                )
+            return reply
         except urllib.error.HTTPError as error:
             detail = ""
             try:
