@@ -1,9 +1,9 @@
-/* Headless self-test: builds a throwaway page from editor.html, injects
-   assertions, and prints the result. Run: node studio/selftest.js
-   Requires Chrome; used to verify the renderer without the desktop app. */
+/* Headless self-test: builds a throwaway page from editor.html beside
+   the real assets, loads a generated checks file into it, and prints the
+   result. Run: node studio/selftest.js
+   Requires Chrome; verifies the renderer without the desktop app. */
 const fs = require("fs");
 const path = require("path");
-const os = require("os");
 const { execFileSync } = require("child_process");
 
 const here = __dirname;
@@ -445,6 +445,7 @@ if (!chrome) {
   process.exit(0);
 }
 
+let exitCode = 0;
 try {
   const dom = execFileSync(chrome, [
     "--headless", "--disable-gpu", "--no-sandbox", "--dump-dom",
@@ -455,7 +456,7 @@ try {
   const match = dom.match(/<title>SELFTEST ([\s\S]*?)<\/title>/);
   if (!match) {
     console.error("self-test did not run: the renderer failed before completing");
-    process.exit(1);
+    throw new Error("renderer did not finish");
   }
   const results = JSON.parse(match[1].replace(/&quot;/g, '"').replace(/&amp;/g, "&"));
   let failed = 0;
@@ -464,8 +465,15 @@ try {
     console.log(`${status === "pass" ? "  ok  " : " FAIL "} ${name}${status === "pass" ? "" : "  -> " + status}`);
   });
   console.log(`\n${results.length - failed}/${results.length} checks passed`);
-  process.exit(failed ? 1 : 0);
+  exitCode = failed ? 1 : 0;
+} catch (error) {
+  console.error(error.message);
+  exitCode = 1;
 } finally {
-  fs.unlinkSync(localCopy);
-  fs.unlinkSync(checksFile);
+  // exiting inside the try would skip this and leave the scaffolding in
+  // studio/, where it gets committed and packaged into the app
+  for (const file of [localCopy, checksFile]) {
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+  }
 }
+process.exit(exitCode);
