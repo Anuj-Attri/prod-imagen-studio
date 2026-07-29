@@ -8,11 +8,15 @@
      - the main process, preload, renderer and launcher parse
      - the server compiles
      - the renderer self-test, which boots the real editor
+     - the files it writes, read back and measured
      - the server's answers to bad input
 
-   Two further checks need hardware and are run by hand:
+   Further checks need hardware, electron, or minutes, and are run by
+   hand:
      node studio/e2e.js              produce one of each document type
      node studio/e2e.js --contract 5 does the agent hold its shape
+     npx electron studio/pdfcheck.js measure a written pdf
+     node studio/mutate.js           break the code, expect red
 */
 const { execFileSync, spawn } = require("child_process");
 const http = require("http");
@@ -69,13 +73,16 @@ function waitForServer(timeoutMs) {
   step("sources parse", () => node([
     "--check", path.join("studio", "main.js"),
   ]));
-  ["preload.js", "editor.js", "launcher.js", "selftest.js", "e2e.js"].forEach((file) => {
+  ["preload.js", "editor.js", "launcher.js", "selftest.js", "e2e.js",
+   "filecheck.js", "pdfcheck.js", "mutate.js"].forEach((file) => {
     step(`${file} parses`, () => node(["--check", path.join("studio", file)]));
   });
   step("server compiles", () => python(["-m", "py_compile",
     path.join("server", "gen_server.py"), path.join("server", "probe.py")]));
 
   step("renderer self-test", () => node([path.join("studio", "selftest.js")]));
+  step("written files are what they claim", () =>
+    node([path.join("studio", "filecheck.js")]));
 
   // The probe needs a server. Start one that reaches nothing, which is
   // what a build machine has anyway, and stop it afterwards.

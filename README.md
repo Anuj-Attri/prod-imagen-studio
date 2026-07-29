@@ -166,8 +166,8 @@ use the deployment for the agent alone.
 
     node verify.js
 
-Parses every source, compiles the server, boots the real renderer and
-puts bad input at the server. Needs no graphics card and no model, so it
+Parses every source, compiles the server, boots the real renderer,
+reads back the files it writes, and puts bad input at the server. Needs no graphics card and no model, so it
 runs anywhere. Two more need hardware:
 
     node studio/e2e.js               produce one of each document type
