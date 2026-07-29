@@ -72,7 +72,7 @@ def ask(model: str, system: str, user: str, key: str, timeout: int = 120) -> dic
         "model": model,
         "messages": [{"role": "system", "content": system},
                      {"role": "user", "content": user}],
-        "max_tokens": 700,
+        "max_tokens": 2500,
     }).encode()
     request = urllib.request.Request(OPENROUTER_CHAT, data=body, headers={
         "Authorization": "Bearer " + key,
@@ -84,8 +84,15 @@ def ask(model: str, system: str, user: str, key: str, timeout: int = 120) -> dic
         payload = json.loads(response.read())
     seconds = time.perf_counter() - started
     usage = payload.get("usage") or {}
+    message = (payload.get("choices") or [{}])[0].get("message") or {}
+    # A reasoning model can answer with an empty content field and put the
+    # words somewhere else, or spend the whole reply on reasoning and send
+    # back nothing at all. Reading only content scored those as crashes,
+    # which blamed the model for a fault in the reading.
+    text = (message.get("content") or message.get("reasoning") or "").strip()
     return {
-        "text": payload["choices"][0]["message"]["content"].strip(),
+        "text": text,
+        "empty": not text,
         "in_tokens": usage.get("prompt_tokens", 0),
         "out_tokens": usage.get("completion_tokens", 0),
         "seconds": round(seconds, 2),
@@ -114,7 +121,8 @@ def run(step: str, text: str, key: str, models: list | None = None) -> dict:
             result = ask(model, system, text, key)
             entries.append({
                 "label": label, "model": model, "ok": True,
-                "text": result["text"], "seconds": result["seconds"],
+                "text": result["text"], "empty": result["empty"],
+                "seconds": result["seconds"],
                 "in_tokens": result["in_tokens"], "out_tokens": result["out_tokens"],
                 "cost": cost_of(model, result, catalogue),
             })
@@ -142,6 +150,12 @@ def report(run_data: dict, reveal: bool) -> str:
         lines.append(f"## {entry['label']}   {name}")
         if not entry["ok"]:
             lines += ["", "did not run: " + entry["error"], ""]
+            continue
+        if entry.get("empty"):
+            # tokens spent with nothing to show is a result, not a crash:
+            # it says this model cannot do this step at this prompt
+            lines += ["", f"answered with nothing, after {entry['out_tokens']} "
+                      f"tokens of reasoning. Not usable for this step.", ""]
             continue
         cost = entry["cost"]
         # a page is not one call; the run rate is what a chapter costs

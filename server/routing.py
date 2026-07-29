@@ -21,23 +21,37 @@ import urllib.request
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
 
-# Preference order per tier, best first. These are hints, not requirements:
-# anything missing from the live catalogue is skipped.
+# Candidates per tier, ordered by what a call actually costs rather than
+# by the quoted price per token. Those are not the same number and the
+# gap is not small: on a dialogue scene, a model listed at $2.08 per
+# million spent 18,762 tokens reasoning and cost $3.91 per hundred calls,
+# while one listed at $25 per million answered in 455 tokens for $1.04.
+# Sorting by sticker price would have picked the more expensive one and
+# called it thrift.
+#
+# The comments give measured cost per hundred calls where a bench run
+# exists (server/bench.py), and the list price otherwise. Anything
+# missing from the live catalogue is skipped.
 TIER_PREFERENCES = {
     "fast": [
-        "google/gemini-2.5-flash",
-        "anthropic/claude-haiku-4.5",
-        "openai/gpt-5-mini",
+        "qwen/qwen3.5-flash-02-23",       # 0.26
+        "deepseek/deepseek-v4-flash",     # 0.28
+        "google/gemini-2.5-flash",        # 1.20
     ],
     "balanced": [
-        "anthropic/claude-sonnet-5",
-        "openai/gpt-5",
-        "google/gemini-2.5-pro",
+        "z-ai/glm-4.6",                   # measured $0.36/100 on dialogue
+        "openai/gpt-5-mini",              # measured $0.47/100
+        "anthropic/claude-sonnet-5",      # 10.00 list
+        # qwen/qwen3.5-122b-a10b is deliberately absent: cheap per token,
+        # $3.91 per hundred calls in practice, from runaway reasoning.
     ],
     "deep": [
-        "anthropic/claude-opus-5",
-        "anthropic/claude-sonnet-5",
-        "openai/gpt-5",
+        "openai/gpt-5.2",                 # measured $0.31/100, 5.5s, best
+                                          # adherence to the scene brief
+        "anthropic/claude-opus-5",        # measured $1.04/100, distinctive
+                                          # prose, three times the cost
+        "moonshotai/kimi-k3",             # measured $1.12/100
+        # google/gemini-3.1-pro-preview truncated the scene on two runs
     ],
 }
 

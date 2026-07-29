@@ -30,3 +30,6 @@ e2e-output/
 # a mutation run in progress
 studio/.mutating
 studio/.editor.original
+
+# bench results, not source
+bench-output/
