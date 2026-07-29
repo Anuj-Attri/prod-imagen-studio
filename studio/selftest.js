@@ -925,6 +925,48 @@ check("re-rendering a page leaves the other pages alone", async () => {
   return calls === 0;
 });
 
+// Panels name the characters they contain, so renaming one in the cast
+// sheet could quietly detach every panel that referred to it.
+check("renaming a character keeps the panels that use it", () => {
+  currentPage().layers = [];
+  doc.cast = [{ id: "c1", name: "Rin", tags: "1girl, long black hair, red kimono" }];
+  const panel = addLayer("panel", { x: 0, y: 0, w: 200, h: 150 });
+  panel.props.prompt = "standing, temple steps";
+  panel.props.cast = ["Rin"];
+  if (!composePrompt(panel).startsWith("1girl, long black hair")) return "setup wrong";
+
+  renameCastMember(doc.cast[0], "Rina");
+
+  const after = composePrompt(panel);
+  return after.startsWith("1girl, long black hair")
+    ? true
+    : "the panel lost its character: " + after;
+});
+
+check("a rename reaches panels on other pages too", () => {
+  doc.pages = [
+    { id: uid(), name: "Page 1", layers: [] },
+    { id: uid(), name: "Page 2", layers: [] },
+  ];
+  doc.cast = [{ id: "c1", name: "Rin", tags: "1girl, long black hair" }];
+  pageIndex = 1;
+  renderCanvas();
+  const far = addLayer("panel", { x: 0, y: 0, w: 100, h: 100 });
+  far.props.cast = ["Rin"];
+  pageIndex = 0;
+  renderCanvas();
+  renameCastMember(doc.cast[0], "Rina");
+  return doc.pages[1].layers[0].props.cast[0] === "Rina";
+});
+check("a rename onto an existing name is refused", () => {
+  doc.cast = [
+    { id: "c1", name: "Rin", tags: "1girl" },
+    { id: "c2", name: "Oni", tags: "1other" },
+  ];
+  const changed = renameCastMember(doc.cast[0], "oni");
+  return changed === false && doc.cast[0].name === "Rin";
+});
+
 // layout engine
 check("templates yield their panel count", () => {
   for (let n = 1; n <= 8; n += 1) if (pageLayout(n).length !== n) return "n=" + n;

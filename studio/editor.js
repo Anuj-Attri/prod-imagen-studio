@@ -375,6 +375,29 @@ function invertPage() {
   toast("Page and lettering inverted");
 }
 
+// Panels name the characters they contain. Renaming one in the cast
+// sheet without carrying the panels across would leave every panel
+// referring to somebody who no longer exists, and the character would
+// quietly vanish from the art the next time it rendered.
+function renameCastMember(member, nextName) {
+  const wanted = String(nextName || "").trim();
+  if (!wanted || wanted === member.name) return false;
+  const taken = doc.cast.some((other) =>
+    other !== member && other.name.toLowerCase() === wanted.toLowerCase());
+  if (taken) { toast(`There is already a character called ${wanted}`, true); return false; }
+
+  const before = member.name.toLowerCase();
+  member.name = wanted;
+  doc.pages.forEach((page) => {
+    page.layers.forEach((layer) => {
+      if (!Array.isArray(layer.props.cast)) return;
+      layer.props.cast = layer.props.cast.map((name) =>
+        String(name).toLowerCase() === before ? wanted : name);
+    });
+  });
+  return true;
+}
+
 function mergeCast(incoming) {
   if (!Array.isArray(incoming) || !incoming.length) return;
   incoming.forEach((entry) => {
@@ -436,8 +459,13 @@ function renderStylePanel() {
       `<button class="cast-del quiet" title="Remove">x</button>` +
       `<textarea class="cast-tags" placeholder="1girl, long black hair, red kimono">${escapeHtml(member.tags)}</textarea>`;
     row.querySelector(".cast-name").addEventListener("change", (e) => {
-      member.name = e.target.value.trim();
-      commit();
+      if (renameCastMember(member, e.target.value)) {
+        renderStylePanel();
+        renderProps();
+        commit("Rename character");
+      } else {
+        e.target.value = member.name;
+      }
     });
     row.querySelector(".cast-tags").addEventListener("change", (e) => {
       member.tags = e.target.value.trim();
