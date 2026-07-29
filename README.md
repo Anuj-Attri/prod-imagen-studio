@@ -155,6 +155,11 @@ With `STUDIO_AUTH_TOKEN` set, every endpoint except `/health` requires
 `Authorization: Bearer <token>`. `/health` also reports the running
 build, which is the quickest way to catch a stale server.
 
+Point the application at it under Advanced in Settings, giving the same
+address and token. The container carries no image engine of its own, so
+either give it the key for a hosted one, or keep generation local and
+use the deployment for the agent alone.
+
 ## Security
 
 - Keys are never committed: `server/keys.json` is gitignored and CI
