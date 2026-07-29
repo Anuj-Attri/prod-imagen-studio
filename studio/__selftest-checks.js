@@ -1,15 +1,4 @@
-/* Headless self-test: builds a throwaway page from editor.html, injects
-   assertions, and prints the result. Run: node studio/selftest.js
-   Requires Chrome; used to verify the renderer without the desktop app. */
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
-const { execFileSync } = require("child_process");
 
-const here = __dirname;
-const html = fs.readFileSync(path.join(here, "editor.html"), "utf-8");
-
-const CHECKS = `
 window.__results = [];
 const __checks = [];
 // checks may be async: the export path walks pages through the canvas
@@ -421,51 +410,3 @@ check("undo restores", () => {
 runChecks().then(() => {
   document.title = "SELFTEST " + JSON.stringify(window.__results);
 });
-`;
-
-// The page ships a strict Content-Security-Policy that forbids inline
-// script, so the checks load as a file like any other script would.
-const checksFile = path.join(here, "__selftest-checks.js");
-fs.writeFileSync(checksFile, CHECKS, "utf-8");
-const localCopy = path.join(here, "__selftest.html");
-fs.writeFileSync(localCopy,
-  html.replace("</body>", '<script src="__selftest-checks.js"></script></body>'), "utf-8");
-
-const candidates = [
-  "C:/Program Files/Google/Chrome/Application/chrome.exe",
-  "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
-  "/usr/bin/google-chrome",
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-];
-const chrome = candidates.find((p) => fs.existsSync(p));
-if (!chrome) {
-  console.error("Chrome not found; skipping renderer self-test");
-  fs.unlinkSync(localCopy);
-  fs.unlinkSync(checksFile);
-  process.exit(0);
-}
-
-try {
-  const dom = execFileSync(chrome, [
-    "--headless", "--disable-gpu", "--no-sandbox", "--dump-dom",
-    "--virtual-time-budget=6000",
-    "file:///" + localCopy.replace(/\\/g, "/"),
-  ], { encoding: "utf-8", maxBuffer: 40 * 1024 * 1024 });
-
-  const match = dom.match(/<title>SELFTEST ([\s\S]*?)<\/title>/);
-  if (!match) {
-    console.error("self-test did not run: the renderer failed before completing");
-    process.exit(1);
-  }
-  const results = JSON.parse(match[1].replace(/&quot;/g, '"').replace(/&amp;/g, "&"));
-  let failed = 0;
-  results.forEach(([name, status]) => {
-    if (status !== "pass") failed += 1;
-    console.log(`${status === "pass" ? "  ok  " : " FAIL "} ${name}${status === "pass" ? "" : "  -> " + status}`);
-  });
-  console.log(`\n${results.length - failed}/${results.length} checks passed`);
-  process.exit(failed ? 1 : 0);
-} finally {
-  fs.unlinkSync(localCopy);
-  fs.unlinkSync(checksFile);
-}
