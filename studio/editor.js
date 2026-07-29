@@ -1958,11 +1958,10 @@ async function pollHealth() {
     const response = await fetch(`${SERVER}/health`);
     const health = await response.json();
     setEngineDot("eng-local", health.local);
-    setEngineDot("eng-pod", health.pod);
     setEngineDot("eng-api", health.apis);
     setEngineDot("eng-story", health.story);
   } catch {
-    ["eng-local", "eng-pod", "eng-api", "eng-story"].forEach((id) => setEngineDot(id, false));
+    ["eng-local", "eng-api", "eng-story"].forEach((id) => setEngineDot(id, false));
   }
   setTimeout(pollHealth, 6000);
 }

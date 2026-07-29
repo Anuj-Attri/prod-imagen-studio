@@ -5,5 +5,18 @@ __pycache__/
 server/keys.json
 .DS_Store
 
-# CUDA interpreter for the local GPU engine
+# Local Python environment for the GPU engine
 .venv-image/
+
+# Working notes and assistant configuration: kept locally, not published
+CLAUDE.md
+AGENTS.md
+GEMINI.md
+.claude/
+.cursor/
+.aider*
+HANDOFF*.md
+NOTES.md
+TODO.md
+*.handoff.md
+scratch/

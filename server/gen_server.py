@@ -1,13 +1,13 @@
-"""prod-imagen studio generation server (public build).
+"""prod-imagen studio generation server.
 
 One generation interface, multiple engines:
+  local-gpu     - diffusers on the local GPU, free and offline
   ideogram      - Ideogram API (typography-strong hosted engine)
   openai-image  - OpenAI image API
   bfl-flux      - Black Forest Labs FLUX API
-  local-dev     - optional local research engine (only when the private
-                  research repo is present on the developer machine)
 
-Engines activate only when their API key exists in the environment or in
+The local engine needs a CUDA build of torch and cached weights. Hosted
+engines activate only when their API key exists in the environment or in
 server/keys.json (never committed). Optional bearer auth for public
 deployments: set STUDIO_AUTH_TOKEN and every endpoint except /health
 requires "Authorization: Bearer <token>".
@@ -20,8 +20,6 @@ import base64
 import json
 import os
 import re
-import sys
-import tempfile
 import threading
 import time
 import urllib.error
@@ -36,7 +34,6 @@ PORT = int(os.environ.get("STUDIO_PORT", "8787"))
 BUILD = "0.4.0"
 KEYS_PATH = Path(__file__).with_name("keys.json")
 AUTH_TOKEN = os.environ.get("STUDIO_AUTH_TOKEN")
-DISTILL_REPO = os.environ.get("DISTILL_REPO")  # private research repo (dev only)
 
 NO_TEXT_SUFFIX = ", no text, no letters, no speech balloons, no captions, no watermarks"
 
@@ -178,38 +175,6 @@ def generate_gpu(prompt: str, seed: int, width: int, height: int) -> bytes:
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     return buffer.getvalue()
-
-
-# ------------------------------------------------------- optional dev engine --
-_local = None
-_local_lock = threading.Lock()
-_case_counter = int(time.time()) % 100000
-
-
-def local_available() -> bool:
-    return bool(DISTILL_REPO and Path(DISTILL_REPO, "benchmarks", "lab", "runner.py").is_file())
-
-
-def generate_local(prompt: str, seed: int) -> bytes:
-    global _local, _case_counter
-    if not local_available():
-        raise RuntimeError("local dev engine requires DISTILL_REPO to point at the research checkout")
-    if DISTILL_REPO not in sys.path:
-        sys.path.insert(0, DISTILL_REPO)
-    with _local_lock:
-        if _local is None:
-            from benchmarks.lab.runner import provider_from_name
-            _local = provider_from_name("distill-pulse-hybrid-v0.6")
-            _local.prepare()
-    from benchmarks.lab.contracts import GenerationRequest
-    _case_counter += 1
-    request = GenerationRequest(
-        case_id=_case_counter, prompt=prompt, width=1024, height=1024, steps=4, seed=seed,
-    )
-    with tempfile.TemporaryDirectory() as tmp:
-        out = Path(tmp) / "panel.png"
-        _local.generate(request, out)
-        return out.read_bytes()
 
 
 # ------------------------------------------------------------ hosted engines --
@@ -606,8 +571,6 @@ def engine_table(current: dict) -> list:
         {"id": "openai-image", "label": "OpenAI image (hosted API)", "available": bool(current["openai"])},
         {"id": "bfl-flux", "label": "FLUX (hosted API)", "available": bool(current["bfl"])},
     ]
-    if local_available():
-        table.insert(0, {"id": "local-dev", "label": "Local dev engine", "available": True})
     if gpu_capable():
         table.insert(0, {
             "id": "local-gpu",
@@ -644,7 +607,7 @@ class Handler(BaseHTTPRequestHandler):
                 "ok": True,
                 "build": BUILD,
                 "auth": bool(AUTH_TOKEN),
-                "local": gpu_available() or local_available(),
+                "local": gpu_available(),
                 "apis": any([current["ideogram"], current["openai"], current["bfl"]]),
                 "story": bool(current["anthropic"]) or local_llm_reachable(current),
             })
@@ -697,8 +660,6 @@ class Handler(BaseHTTPRequestHandler):
                 image = generate_gpu(prompt, seed,
                                      int(payload.get("width", 1024)),
                                      int(payload.get("height", 1024)))
-            elif engine == "local-dev":
-                image = generate_local(prompt, seed)
             elif engine == "ideogram":
                 if not current["ideogram"]:
                     raise RuntimeError("Ideogram key missing")
