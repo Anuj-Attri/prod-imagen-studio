@@ -55,6 +55,70 @@ check("title text scales", () => {
   return findLayer(layer.id).props.fontSize > before;
 });
 
+// The original complaint was that many elements could not be resized and
+// were hard to grab. Prove it for every type, not just the ones that
+// happened to get tested.
+check("every layer type resizes", () => {
+  const broken = [];
+  const kinds = ["panel", "image", "balloon", "caption", "text", "sfx",
+                 "rect", "ellipse", "star", "line", "arrow", "draw"];
+  kinds.forEach((kind) => {
+    currentPage().layers = [];
+    const layer = kind === "draw"
+      ? addLayer("draw", { x: 0, y: 0 },
+                 { points: [0, 0, 40, 20, 80, 0], stroke: "#111", strokeWidth: 4 })
+      : addLayer(kind, { x: 20, y: 20, w: 120, h: 90 });
+    const before = JSON.stringify({
+      w: layer.w, h: layer.h,
+      font: layer.props.fontSize, points: layer.props.points,
+    });
+    select(layer.id);
+    nodes.get(layer.id).scale({ x: 2, y: 2 });
+    transformer.fire("transformend");
+    const after = findLayer(layer.id);
+    const now = JSON.stringify({
+      w: after.w, h: after.h,
+      font: after.props.fontSize, points: after.props.points,
+    });
+    if (now === before) broken.push(kind);
+  });
+  return broken.length === 0 ? true : "unchanged by resize: " + broken.join(", ");
+});
+
+check("every layer type can be grabbed across its body", () => {
+  const broken = [];
+  const kinds = ["panel", "balloon", "caption", "text", "sfx",
+                 "rect", "ellipse", "star"];
+  zoom = 1;
+  world.position({ x: 0, y: 0 });
+  applyView();
+  kinds.forEach((kind) => {
+    currentPage().layers = [];
+    const layer = addLayer(kind, { x: 20, y: 20, w: 120, h: 90 });
+    renderCanvas();
+    pageLayer.draw();
+    const node = nodes.get(layer.id);
+    if (!node.draggable()) { broken.push(kind + ":not draggable"); return; }
+    const box = node.getClientRect({ relativeTo: world });
+    // the centre of the body: a bounding box corner is legitimately
+    // outside an ellipse, a star, or a balloon's rounded corner
+    const probe = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    let hit = stage.getIntersection(probe);
+    while (hit && !nodes.has(hit.id())) hit = hit.getParent();
+    if (!hit || hit.id() !== layer.id) broken.push(kind + ":not hit");
+  });
+  return broken.length === 0 ? true : broken.join(", ");
+});
+
+check("a balloon sits where it says it does", () => {
+  currentPage().layers = [];
+  const layer = addLayer("balloon", { x: 200, y: 300, w: 140 });
+  renderCanvas();
+  const box = nodes.get(layer.id).getClientRect({ relativeTo: world });
+  // the body's top left is the stored position, give or take the outline
+  return Math.abs(box.x - 200) < 4 && Math.abs(box.y - 300) < 4;
+});
+
 // layout engine
 check("templates yield their panel count", () => {
   for (let n = 1; n <= 8; n += 1) if (pageLayout(n).length !== n) return "n=" + n;
@@ -267,8 +331,10 @@ check("balloon tail direction is settable", () => {
   layer.props.tail = "left";
   layer.props.tailLength = 40;
   renderCanvas();
-  const tag = nodes.get(layer.id).findOne("Tag");
-  return tag.pointerDirection() === "left" && tag.pointerHeight() === 40;
+  const tail = nodes.get(layer.id).findOne(".tail");
+  if (!tail) return "no tail";
+  // a left tail reaches out past the balloon's left edge
+  return Math.min(...tail.points().filter((_, i) => i % 2 === 0)) < 0;
 });
 check("captions can carry an outline", () => {
   const layer = addLayer("caption", { x: 30, y: 120 });

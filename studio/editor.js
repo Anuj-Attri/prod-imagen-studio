@@ -781,23 +781,48 @@ function buildNode(layer) {
       strokeWidth: layer.props.strokeWidth, name: "shape",
     }));
   } else if (layer.type === "balloon") {
-    node = new Konva.Label(common);
-    node.add(new Konva.Tag({
-      fill: layer.props.bg || "#fff", stroke: layer.props.ink || "#111",
-      strokeWidth: 2.5, cornerRadius: layer.props.shape === "thought" ? 26 : 18,
-      // the tail is what tells the reader who is speaking
-      pointerDirection: layer.props.tail || "down",
-      pointerWidth: layer.props.tailWidth || 22,
-      pointerHeight: layer.props.tailLength || 26,
-    }));
-    node.add(new Konva.Text({
+    // Built as an ordinary group rather than Konva.Label, which anchors
+    // its origin at the tail tip: a balloon would then sit far above the
+    // coordinate it claims to be at, unlike every other layer.
+    node = new Konva.Group(common);
+    const padding = 13;
+    const body = new Konva.Text({
       text: layer.props.text, fontFamily: fontOf(layer), fontStyle: "600",
-      fontSize: layer.props.fontSize, fill: layer.props.color || "#111", padding: 13,
-      width: layer.w, align: "center", wrap: "word", name: "label-text",
+      fontSize: layer.props.fontSize, fill: layer.props.color || "#111",
+      padding, width: layer.w, align: "center", wrap: "word", name: "label-text",
       ...outlineProps(layer),
       lineHeight: layer.props.lineHeight || 1.15,
       letterSpacing: layer.props.letterSpacing || 0,
+    });
+    const bodyH = Math.max(body.height(), layer.props.fontSize + padding * 2);
+    const tailLen = layer.props.tailLength || 26;
+    const tailW = layer.props.tailWidth || 22;
+    const direction = layer.props.tail || "down";
+    const tails = {
+      down: [layer.w * 0.34, bodyH, layer.w * 0.34 + tailW, bodyH,
+             layer.w * 0.40, bodyH + tailLen],
+      up: [layer.w * 0.34, 0, layer.w * 0.34 + tailW, 0, layer.w * 0.40, -tailLen],
+      left: [0, bodyH * 0.45, 0, bodyH * 0.45 + tailW, -tailLen, bodyH * 0.40],
+      right: [layer.w, bodyH * 0.45, layer.w, bodyH * 0.45 + tailW,
+              layer.w + tailLen, bodyH * 0.40],
+    };
+    if (direction !== "none" && tails[direction]) {
+      node.add(new Konva.Line({
+        points: tails[direction], closed: true,
+        fill: layer.props.bg || "#fff",
+        stroke: layer.props.ink || "#111", strokeWidth: 2.5,
+        lineJoin: "round", name: "tail",
+      }));
+    }
+    node.add(new Konva.Rect({
+      width: layer.w, height: bodyH, name: "frame",
+      fill: layer.props.bg || "#fff",
+      stroke: layer.props.ink || "#111", strokeWidth: 2.5,
+      cornerRadius: layer.props.shape === "thought" ? 26 : 18,
     }));
+    node.add(body);
+    // the tail is drawn first so the body's outline covers its base
+    node.findOne(".tail") && node.findOne(".tail").moveToBottom();
   } else if (layer.type === "caption") {
     node = new Konva.Group(common);
     const text = new Konva.Text({
