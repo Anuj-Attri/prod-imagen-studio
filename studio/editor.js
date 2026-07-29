@@ -702,6 +702,15 @@ function buildNode(layer) {
       strokeWidth: layer.props.strokeWidth != null ? layer.props.strokeWidth : 2,
       cornerRadius: layer.props.radius || 0,
     }));
+    if (layer.props.label) {
+      node.add(new Konva.Text({
+        width: layer.w, height: layer.h, text: layer.props.label,
+        align: "center", verticalAlign: "middle", padding: 8,
+        fontFamily: fontOf(layer), fontSize: layer.props.labelSize || 14,
+        fill: layer.props.labelColor || "#111", name: "box-label",
+        listening: false,
+      }));
+    }
   }
   applyFlip(node, layer);
   node.opacity((layer.props.opacity != null ? layer.props.opacity : 100) / 100);
@@ -1510,7 +1519,10 @@ function renderProps() {
     html += propField("Fill", `<input data-k="fill" type="color" value="${layer.props.fill}">`);
     html += propField("Stroke", `<input data-k="stroke" type="color" value="${layer.props.stroke || "#111111"}">`);
     html += propField("Stroke px", `<input data-k="strokeWidth" type="number" value="${layer.props.strokeWidth != null ? layer.props.strokeWidth : 2}">`);
-    if (layer.type === "rect") html += propField("Corner", `<input data-k="radius" type="number" value="${layer.props.radius || 0}">`);
+    if (layer.type === "rect") {
+      html += propField("Corner", `<input data-k="radius" type="number" value="${layer.props.radius || 0}">`);
+      html += propField("Label", `<input data-k="label" value="${escapeHtml(layer.props.label || "")}" placeholder="optional text inside">`);
+    }
   }
   if (["draw", "line", "arrow"].includes(layer.type)) {
     html += propField("Color", `<input data-k="stroke" type="color" value="${layer.props.stroke}">`);
@@ -2346,6 +2358,104 @@ function detectPanels(image, pageW, pageH) {
     .sort((a, b) => (a.y - b.y) || (doc.kind === "manga" ? b.x - a.x : a.x - b.x));
 }
 
+// ------------------------------------------------------------ blueprint --
+// A diagram has to be exact, so it is drawn as real boxes and arrows
+// rather than generated as a picture. Nodes are placed in columns by how
+// far they sit from an input, which reads as flow from left to right.
+const NODE_ROLES = {
+  input: { fill: "#123a5c", ink: "#7fc4ff" },
+  process: { fill: "#152b4a", ink: "#9fd0ff" },
+  store: { fill: "#1c2f4f", ink: "#b5c9ff" },
+  output: { fill: "#14402f", ink: "#8fe0b6" },
+  decision: { fill: "#432a12", ink: "#ffc98f" },
+};
+
+function columnsForGraph(nodes, edges) {
+  const depth = new Map(nodes.map((n) => [n.id, 0]));
+  // longest path from a root, bounded so a cycle cannot spin forever
+  for (let pass = 0; pass < nodes.length; pass += 1) {
+    let changed = false;
+    edges.forEach((edge) => {
+      const next = (depth.get(edge.from) || 0) + 1;
+      if (next > (depth.get(edge.to) || 0)) { depth.set(edge.to, next); changed = true; }
+    });
+    if (!changed) break;
+  }
+  const columns = new Map();
+  nodes.forEach((node) => {
+    const d = depth.get(node.id) || 0;
+    if (!columns.has(d)) columns.set(d, []);
+    columns.get(d).push(node);
+  });
+  return columns;
+}
+
+function buildBlueprint(nodes, edges) {
+  currentPage().layers = [];
+  selectedIds = [];
+  setPageBackground("#0a1b2e");
+
+  const columns = columnsForGraph(nodes, edges);
+  const count = columns.size || 1;
+  const boxW = Math.max(120, Math.min(210, Math.floor((PAGE.w - 80) / count) - 30));
+  const boxH = 76;
+  const step = count > 1 ? Math.floor((PAGE.w - 80 - boxW) / (count - 1)) : 0;
+
+  const placed = new Map();
+  [...columns.keys()].sort((a, b) => a - b).forEach((depth, columnIndex) => {
+    const column = columns.get(depth);
+    const spacing = PAGE.h / (column.length + 1);
+    column.forEach((node, rowIndex) => {
+      const box = {
+        x: 40 + columnIndex * step,
+        y: Math.round(spacing * (rowIndex + 1) - boxH / 2),
+        w: boxW, h: boxH,
+      };
+      const role = NODE_ROLES[node.role] || NODE_ROLES.process;
+      const layer = addLayer("rect", box, {
+        fill: role.fill, stroke: role.ink, strokeWidth: 2, radius: 8,
+        label: node.label, labelColor: role.ink,
+      });
+      layer.name = node.label;
+      placed.set(node.id, { layer, box });
+    });
+  });
+
+  edges.forEach((edge) => {
+    const from = placed.get(edge.from);
+    const to = placed.get(edge.to);
+    if (!from || !to) return;
+    const forward = to.box.x >= from.box.x;
+    const start = {
+      x: forward ? from.box.x + from.box.w : from.box.x,
+      y: from.box.y + from.box.h / 2,
+    };
+    const end = {
+      x: forward ? to.box.x : to.box.x + to.box.w,
+      y: to.box.y + to.box.h / 2,
+    };
+    const connector = addLayer("arrow", { x: Math.round(start.x), y: Math.round(start.y) }, {
+      points: [0, 0, Math.round(end.x - start.x), Math.round(end.y - start.y)],
+      stroke: "#6f9fd8", strokeWidth: 2,
+    });
+    connector.name = `${edge.from} to ${edge.to}`;
+    if (edge.label) {
+      const label = addLayer("caption", {
+        x: Math.round((start.x + end.x) / 2 - 55),
+        y: Math.round((start.y + end.y) / 2 - 26),
+        w: 110,
+      }, { fontSize: 12, bg: "#0a1b2e", color: "#cfe3ff", ink: "#6f9fd8" });
+      label.props.text = edge.label;
+      label.name = edge.label;
+    }
+  });
+
+  select(null);
+  renderCanvas();
+  checkpoint(`Blueprint: ${nodes.length} components`);
+  toast(`Diagram with ${nodes.length} components`);
+}
+
 // The agent's page plan: lay the page out here, create the layers, then
 // render each panel's art with the engine picked in the top bar.
 // A document that is not a comic is one artwork plus lettering, not a
@@ -2863,7 +2973,9 @@ async function sendChat() {
     doc.chat.push({ role: "assistant", content: result.reply });
     setBusy(null);
     mergeCast(result.cast);
-    if (Array.isArray(result.panels) && result.panels.length) {
+    if (Array.isArray(result.nodes) && result.nodes.length) {
+      buildBlueprint(result.nodes, result.edges || []);
+    } else if (Array.isArray(result.panels) && result.panels.length) {
       const layout = recipe().layout;
       if (layout !== "panels") await applyAgentArtwork(result.panels, layout);
       else if (doc.style.pageMode !== "panels") await applyAgentPage(result.panels);

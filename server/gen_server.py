@@ -498,11 +498,17 @@ LAYOUT_DIRECTIVES = {
         "optionally one short line underneath. Use kind text."
     ),
     "blueprint": (
-        "This project is a technical blueprint or systems diagram, not "
-        "character art. Return exactly ONE panel describing the "
-        "schematic: the components, how they connect, the projection. "
-        "Never include people. The dialogue list is the callout labels, "
-        "up to eight short component names, kind caption."
+        "This project is a systems diagram. Do NOT return panels and do "
+        "NOT describe artwork: a diagram must be exact, so the "
+        "application draws it as real boxes and arrows. Return instead "
+        '{"reply": "at most 15 words", "nodes": [{"id": "tank", '
+        '"label": "Storage tank", "role": "store"}], "edges": [{"from": '
+        '"roof", "to": "tank", "label": "runoff"}]}. '
+        "Every id is lowercase with no spaces and every edge must "
+        "reference ids that exist in nodes. role is one of input, "
+        "process, store, output or decision. Labels are two or three "
+        "words. Return 4 to 12 nodes covering the real components and "
+        "the flow between them, in order from input to output."
     ),
 }
 
@@ -545,17 +551,20 @@ def parse_agent_json(text: str) -> dict:
         try:
             data = json.loads(cleaned[start:end + 1])
             if isinstance(data, dict) and "reply" in data:
-                panels = data.get("panels")
-                cast = data.get("cast")
+                def as_list(key):
+                    value = data.get(key)
+                    return value if isinstance(value, list) else []
                 return {
                     "reply": str(data["reply"]),
-                    "panels": panels if isinstance(panels, list) else [],
-                    "cast": cast if isinstance(cast, list) else [],
+                    "panels": as_list("panels"),
+                    "cast": as_list("cast"),
+                    "nodes": as_list("nodes"),
+                    "edges": as_list("edges"),
                 }
         except Exception:
             pass
     # model ignored the contract: degrade to a plain text reply
-    return {"reply": text, "panels": [], "cast": []}
+    return {"reply": text, "panels": [], "cast": [], "nodes": [], "edges": []}
 
 
 def agent_chat(payload: dict, current: dict) -> dict:
@@ -603,10 +612,34 @@ def agent_chat(payload: dict, current: dict) -> dict:
         for c in result.get("cast", [])
         if isinstance(c, dict) and c.get("name") and c.get("tags")
     ][:12]
+    nodes = [
+        {
+            "id": str(n["id"])[:40],
+            "label": str(n.get("label") or n["id"])[:60],
+            "role": str(n.get("role", "process"))[:20],
+        }
+        for n in result.get("nodes", [])
+        if isinstance(n, dict) and n.get("id")
+    ][:16]
+    known = {n["id"] for n in nodes}
+    edges = [
+        {
+            "from": str(e["from"])[:40],
+            "to": str(e["to"])[:40],
+            "label": str(e.get("label", ""))[:40],
+        }
+        for e in result.get("edges", [])
+        # an edge to a node that was never declared would draw into space
+        if isinstance(e, dict) and str(e.get("from")) in known and str(e.get("to")) in known
+    ][:32]
+
     reply = short_reply(result["reply"])
     if panels and (len(reply) > 160 or not reply):
         reply = f"Built a {len(panels)} panel page."
-    return {"reply": reply, "panels": panels, "cast": cast}
+    if nodes and not reply:
+        reply = f"Diagram with {len(nodes)} components."
+    return {"reply": reply, "panels": panels, "cast": cast,
+            "nodes": nodes, "edges": edges}
 
 
 # -------------------------------------------------------------------- server --

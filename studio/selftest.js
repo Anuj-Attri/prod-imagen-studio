@@ -145,6 +145,38 @@ check("line height reaches the text node", () => {
   return nodes.get(layer.id).findOne(".label-text").lineHeight() === 1.8;
 });
 
+// blueprint: exact vector diagram, not generated art
+check("blueprint builds boxes and connectors", () => {
+  buildBlueprint(
+    [{ id: "roof", label: "Roof", role: "input" },
+     { id: "filter", label: "Filter", role: "process" },
+     { id: "tank", label: "Storage tank", role: "store" },
+     { id: "tap", label: "Tap", role: "output" }],
+    [{ from: "roof", to: "filter", label: "runoff" },
+     { from: "filter", to: "tank" },
+     { from: "tank", to: "tap" }]);
+  const boxes = currentPage().layers.filter(l => l.type === "rect" && l.props.label);
+  const arrows = currentPage().layers.filter(l => l.type === "arrow");
+  return boxes.length === 4 && arrows.length === 3;
+});
+check("blueprint orders columns by flow", () => {
+  const byName = {};
+  currentPage().layers.filter(l => l.type === "rect").forEach(l => { byName[l.props.label] = l.x; });
+  return byName["Roof"] < byName["Filter"]
+    && byName["Filter"] < byName["Storage tank"]
+    && byName["Storage tank"] < byName["Tap"];
+});
+check("box label renders inside the box", () => {
+  const box = currentPage().layers.find(l => l.type === "rect" && l.props.label);
+  const text = nodes.get(box.id).findOne(".box-label");
+  return !!text && text.text() === box.props.label;
+});
+check("connectors span between boxes", () => {
+  const arrow = currentPage().layers.find(l => l.type === "arrow");
+  const [x1, y1, x2, y2] = arrow.props.points;
+  return Math.abs(x2 - x1) > 10 || Math.abs(y2 - y1) > 10;
+});
+
 // history
 check("named checkpoints recorded", () => {
   checkpoint("Test checkpoint");
