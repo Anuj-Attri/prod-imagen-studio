@@ -675,6 +675,64 @@ check("moving the view commits an open text editor", () => {
   return gone && kept ? true : "gone=" + gone + " kept=" + kept;
 });
 
+// A render takes many seconds, so anything can happen while it is in
+// flight: the panel gets deleted, the page changes, someone steps back.
+check("a render that finishes after its panel is gone says so", async () => {
+  currentPage().layers = [];
+  const layer = addLayer("panel", { x: 0, y: 0, w: 200, h: 150 });
+  layer.props.prompt = "1girl, standing";
+  select(layer.id);
+
+  const engine = document.getElementById("engine");
+  const had = engine.innerHTML;
+  engine.innerHTML = "<option value='local-gpu'>Local GPU</option>";
+
+  const realFetch = window.fetch;
+  let release;
+  window.fetch = () => new Promise((resolve) => {
+    release = () => resolve({
+      json: async () => ({
+        ok: true, engine: "local-gpu", seed: 1, latency_ms: 10,
+        image_base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      }),
+    });
+  });
+
+  const inFlight = generatePanel(layer).then(() => "applied").catch((e) => e.message);
+  // the panel is deleted while the engine is still working
+  currentPage().layers = [];
+  renderCanvas();
+  release();
+  const outcome = await inFlight;
+
+  window.fetch = realFetch;
+  engine.innerHTML = had;
+  return outcome !== "applied"
+    ? true
+    : "the result was applied to a panel that no longer exists";
+});
+
+check("a render still lands when its panel is merely deselected", async () => {
+  currentPage().layers = [];
+  const layer = addLayer("panel", { x: 0, y: 0, w: 200, h: 150 });
+  layer.props.prompt = "1girl, standing";
+  const engine = document.getElementById("engine");
+  const had = engine.innerHTML;
+  engine.innerHTML = "<option value='local-gpu'>Local GPU</option>";
+  const realFetch = window.fetch;
+  window.fetch = async () => ({
+    json: async () => ({
+      ok: true, engine: "local-gpu", seed: 1, latency_ms: 10,
+      image_base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    }),
+  });
+  select(null);                       // deselected, but still on the page
+  await generatePanel(layer);
+  window.fetch = realFetch;
+  engine.innerHTML = had;
+  return String(findLayer(layer.id).props.image).startsWith("data:image");
+});
+
 // layout engine
 check("templates yield their panel count", () => {
   for (let n = 1; n <= 8; n += 1) if (pageLayout(n).length !== n) return "n=" + n;

@@ -2589,6 +2589,13 @@ function panelSeed(layer) {
   return doc.style.seedBase + Math.max(index, 0) * 101 + pageIndex * 7919;
 }
 
+// A render takes many seconds, and the page can change underneath it.
+// Writing the result to a layer that has since been deleted loses the
+// work quietly and still reports success.
+function layerStillPresent(layer) {
+  return doc.pages.some((page) => page.layers.includes(layer));
+}
+
 async function generatePanel(layer) {
   if (!engineReady()) throw new Error("no image engine configured");
   const size = renderSize(layer);
@@ -2604,6 +2611,9 @@ async function generatePanel(layer) {
   });
   const result = await response.json();
   if (!result.ok) throw new Error(result.error || "generation failed");
+  if (!layerStillPresent(layer)) {
+    throw new Error(`${layer.name} was removed before its art arrived`);
+  }
   layer.props.image = "data:image/png;base64," + result.image_base64;
   layer.props.engineUsed = result.engine;
   layer.props.seedUsed = result.seed;
