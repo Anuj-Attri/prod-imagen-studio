@@ -884,7 +884,6 @@ function buildNode(layer) {
     node.globalCompositeOperation(layer.props.blend);
   }
 
-  let dragSiblings = null; // id -> start position, for group drags
   node.on("dragstart", (event) => {
     if (!selectedIds.includes(layer.id)) select(layer.id);
     // holding alt drops a copy at the original position and drags on
@@ -899,30 +898,16 @@ function buildNode(layer) {
       });
       renderLayerList();
     }
-    dragSiblings = {};
-    selectedIds.forEach((id) => {
-      const other = nodes.get(id);
-      if (other) dragSiblings[id] = { x: other.x(), y: other.y(), self: other === node };
-    });
   });
   node.on("dragmove", () => {
-    if (dragSiblings && selectedIds.length > 1) {
-      const start = dragSiblings[layer.id];
-      const dx = node.x() - start.x, dy = node.y() - start.y;
-      selectedIds.forEach((id) => {
-        if (id === layer.id) return;
-        const other = nodes.get(id);
-        const s = dragSiblings[id];
-        if (other && s) other.position({ x: s.x + dx, y: s.y + dy });
-      });
-    } else {
-      snapDrag(node);
-    }
+    // A Transformer already carries every node attached to it when one
+    // is dragged. Moving the siblings here as well applied the delta
+    // twice and threw a multiple selection apart.
+    if (selectedIds.length === 1) snapDrag(node);
     pageLayer.batchDraw();
   });
   node.on("dragend", () => {
     guides.destroyChildren();
-    dragSiblings = null;
     node._duplicated = false;
     selectedIds.forEach((id) => {
       const other = nodes.get(id);

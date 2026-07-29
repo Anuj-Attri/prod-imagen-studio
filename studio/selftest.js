@@ -119,6 +119,101 @@ check("a balloon sits where it says it does", () => {
   return Math.abs(box.x - 200) < 4 && Math.abs(box.y - 300) < 4;
 });
 
+// The context menu was reported missing. Prove each entry does its job,
+// not merely that the menu opens.
+check("every context menu action performs", () => {
+  const failures = [];
+  const run = (label, setup, expect) => {
+    currentPage().layers = [];
+    const target = setup();
+    showContextMenu(50, 50, contextItemsForSelection());
+    const entry = [...document.querySelectorAll(".menu-drop.show .menu-item")]
+      .find((el) => el.textContent.startsWith(label));
+    if (!entry) { failures.push(label + ":missing"); hideContextMenu(); return; }
+    entry.click();
+    if (!expect(target)) failures.push(label + ":no effect");
+  };
+
+  run("Duplicate", () => {
+    const l = addLayer("rect", { x: 10, y: 10, w: 40, h: 40 });
+    select(l.id);
+    return l;
+  }, () => currentPage().layers.length === 2);
+
+  run("Delete", () => {
+    const l = addLayer("rect", { x: 10, y: 10, w: 40, h: 40 });
+    select(l.id);
+    return l;
+  }, () => currentPage().layers.length === 0);
+
+  run("Flip Horizontal", () => {
+    const l = addLayer("rect", { x: 10, y: 10, w: 40, h: 40 });
+    select(l.id);
+    return l;
+  }, (l) => findLayer(l.id).props.flipX === true);
+
+  run("Send to Back", () => {
+    addLayer("rect", { x: 0, y: 0, w: 20, h: 20 });
+    const top = addLayer("rect", { x: 30, y: 0, w: 20, h: 20 });
+    select(top.id);
+    return top;
+  }, (l) => currentPage().layers[0].id === l.id);
+
+  run("Lock", () => {
+    const l = addLayer("rect", { x: 10, y: 10, w: 40, h: 40 });
+    select(l.id);
+    return l;
+  }, (l) => findLayer(l.id).locked === true);
+
+  run("Hide", () => {
+    const l = addLayer("rect", { x: 10, y: 10, w: 40, h: 40 });
+    select(l.id);
+    return l;
+  }, (l) => findLayer(l.id).visible === false);
+
+  return failures.length === 0 ? true : failures.join(", ");
+});
+
+// Dragging was reported as poor. Check the whole cycle, not just that
+// the node accepts a drag.
+check("dragging a layer records its new position", () => {
+  currentPage().layers = [];
+  const layer = addLayer("rect", { x: 100, y: 100, w: 60, h: 60 });
+  select(layer.id);
+  const node = nodes.get(layer.id);
+  node.fire("dragstart", { evt: {} });
+  node.position({ x: 260, y: 340 });
+  node.fire("dragend");
+  const after = findLayer(layer.id);
+  return after.x === 260 && after.y === 340;
+});
+
+check("dragging one of a selection moves them all together", () => {
+  currentPage().layers = [];
+  const a = addLayer("rect", { x: 0, y: 0, w: 40, h: 40 });
+  const b = addLayer("rect", { x: 100, y: 0, w: 40, h: 40 });
+  selectedIds = [a.id, b.id];
+  syncSelection();
+  const node = nodes.get(a.id);
+  node.fire("dragstart", { evt: {} });
+  node.position({ x: 50, y: 70 });        // moved by +50, +70
+  node.fire("dragmove");
+  node.fire("dragend");
+
+  const movedB = findLayer(b.id);
+  // moved once by the delta, not twice
+  if (movedB.x === 150 && movedB.y === 70) return true;
+  return "b=" + movedB.x + "," + movedB.y + " expected 150,70";
+});
+
+check("a locked layer cannot be dragged", () => {
+  currentPage().layers = [];
+  const layer = addLayer("rect", { x: 10, y: 10, w: 40, h: 40 });
+  layer.locked = true;
+  renderCanvas();
+  return nodes.get(layer.id).draggable() === false;
+});
+
 // layout engine
 check("templates yield their panel count", () => {
   for (let n = 1; n <= 8; n += 1) if (pageLayout(n).length !== n) return "n=" + n;
