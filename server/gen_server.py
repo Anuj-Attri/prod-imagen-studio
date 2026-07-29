@@ -441,11 +441,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _chat(self, payload: dict) -> None:
         current = keys()
-        if not current["anthropic"]:
-            self._json(500, {"error": "Agent needs an Anthropic key"})
-            return
         try:
-            self._json(200, {"ok": True, "reply": agent_chat(payload, current["anthropic"])})
+            self._json(200, {"ok": True, "reply": agent_chat(payload, current)})
         except Exception as error:
             self._json(500, {"error": f"{type(error).__name__}: {error}"})
 

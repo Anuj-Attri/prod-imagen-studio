@@ -1046,7 +1046,12 @@ function eraseAt(pointer) {
 
 stage.on("mousedown", (event) => {
   const pointer = stage.getPointerPosition();
-  if (spaceDown) { panStart = { ...pointer, wx: world.x(), wy: world.y() }; return; }
+  if (event.evt.button === 1 || spaceDown) { // middle mouse or space: pan
+    event.evt.preventDefault();
+    panStart = { ...pointer, wx: world.x(), wy: world.y() };
+    stage.container().style.cursor = "grabbing";
+    return;
+  }
   const at = toWorld(pointer);
   if (cropTarget) {
     drawStart = at;
@@ -1140,7 +1145,11 @@ stage.on("mousemove", () => {
 });
 
 stage.on("mouseup", () => {
-  if (panStart) { panStart = null; return; }
+  if (panStart) {
+    panStart = null;
+    stage.container().style.cursor = tool === "select" ? "" : "crosshair";
+    return;
+  }
   if (erasing) { erasing = false; commit(); return; }
   if (brushPoints) {
     const points = brushPoints;
