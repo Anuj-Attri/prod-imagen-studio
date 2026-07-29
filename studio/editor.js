@@ -3661,6 +3661,41 @@ This is a further page in the same work. `
     button.disabled = false;
   }
 }
+// A chapter usually exists as writing before it exists as pages. Taking
+// it a scene at a time is the difference between using this for a
+// chapter and using it for a page.
+function scenesFrom(text) {
+  const BLANK_LINE = new RegExp("\\n\\s*\\n");   // a blank line separates scenes
+  return String(text)
+    .split(BLANK_LINE)
+    .map((scene) => scene.replace(/\s+/g, " ").trim())
+    .filter((scene) => scene.length > 3)
+    .slice(0, 24);
+}
+
+async function buildFromScript(text) {
+  const scenes = scenesFrom(text);
+  if (!scenes.length) { toast("Nothing to build: paste a scene or two"); return 0; }
+  const button = document.getElementById("script-build");
+  button.disabled = true;
+  try {
+    for (let i = 0; i < scenes.length; i += 1) {
+      setBusy(`Scene ${i + 1} of ${scenes.length}`);
+      await sendChat(scenes[i], true);
+    }
+    toast(`Built ${scenes.length} pages from the script`);
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    setBusy(null);
+    button.disabled = false;
+  }
+  return scenes.length;
+}
+
+document.getElementById("script-build").onclick = () =>
+  buildFromScript(document.getElementById("script-text").value);
+
 document.getElementById("more-pages").onclick = () => {
   const count = parseInt(document.getElementById("more-count").value, 10) || 1;
   generateMorePages(Math.min(Math.max(count, 1), 12));

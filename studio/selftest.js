@@ -788,6 +788,41 @@ check("every document type has a real paper size", () => {
   return wrong.length === 0 ? true : wrong.join(", ");
 });
 
+// A chapter exists as writing before it exists as pages.
+check("a script becomes one page per scene", async () => {
+  currentPage().layers = [];
+  doc.chat.length = 0;
+  const asked = [];
+  const realSend = window.sendChat;
+  window.sendChat = async (text, quiet) => { asked.push({ text, quiet }); };
+  const script = [
+    "Rin faces the oni on the temple steps at dawn.",
+    "",
+    "She draws her blade. The village burns behind her.",
+    "",
+    "",
+    "   The oni laughs and raises its club.   ",
+    "",
+    "x",
+  ].join(String.fromCharCode(10));
+  const built = await buildFromScript(script);
+  window.sendChat = realSend;
+  if (built !== 3) return "made " + built + " pages, expected 3";
+  // blank runs collapse, whitespace is tidied, a stray character is not
+  // a scene, and the order is the order it was written in
+  return asked[0].text.startsWith("Rin faces")
+    && asked[2].text === "The oni laughs and raises its club."
+    && asked.every((a) => a.quiet === true);
+});
+check("an empty script builds nothing", async () => {
+  const asked = [];
+  const realSend = window.sendChat;
+  window.sendChat = async () => { asked.push(1); };
+  const built = await buildFromScript("   " + String.fromCharCode(10) + "  ");
+  window.sendChat = realSend;
+  return built === 0 && asked.length === 0;
+});
+
 // layout engine
 check("templates yield their panel count", () => {
   for (let n = 1; n <= 8; n += 1) if (pageLayout(n).length !== n) return "n=" + n;

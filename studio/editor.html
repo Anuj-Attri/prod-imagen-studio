@@ -492,6 +492,12 @@
       </div>
       <div class="prop-note" style="margin-top:6px">Repeats your last brief on new
         pages, varying the scene each time. Same characters, same style.</div>
+      <div class="dock-section-title">Build from a script</div>
+      <textarea id="script-text" placeholder="Paste a script. One scene per paragraph, blank line between."
+        style="width:100%;min-height:90px;background:var(--bg);color:var(--ink);border:1px solid var(--hairline);border-radius:6px;padding:7px 9px;font:inherit;resize:vertical;user-select:text"></textarea>
+      <button id="script-build" style="width:100%;margin-top:6px">Build a page per scene</button>
+      <div class="prop-note" style="margin-top:6px">Each paragraph becomes its own
+        page, in order, holding the cast and style you have set.</div>
       <div class="row-2" style="margin-top:10px">
         <button id="export-all">Export PNGs</button>
         <button id="export-pdf">Export PDF</button>
