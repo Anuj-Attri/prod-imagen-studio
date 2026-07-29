@@ -42,7 +42,7 @@
     .tile h2 { font-size: 13px; font-weight: 600; }
     .tile p { color: var(--ink-3); font-size: 11.5px; margin-top: 2px; }
     .tile .tag { float: right; font-size: 9.5px; letter-spacing: 0.06em; color: var(--ink-3); border: 1px solid var(--hairline); border-radius: 4px; padding: 1px 6px; }
-    .kinds { display: flex; gap: 6px; margin: 16px 0 22px; }
+    .kinds { display: flex; flex-wrap: wrap; gap: 6px; margin: 16px 0 22px; }
     .kind {
       font-size: 11px; color: var(--ink-2); border: 1px solid var(--hairline);
       border-radius: 99px; padding: 3px 11px; cursor: pointer;
@@ -92,8 +92,10 @@
   <div class="kinds" id="kinds">
     <span class="kind sel" data-kind="manga">Manga</span>
     <span class="kind" data-kind="anime">Illustration</span>
+    <span class="kind" data-kind="coloring">Coloring book</span>
     <span class="kind" data-kind="poster">Poster</span>
-    <span class="kind" data-kind="diagram">Diagram</span>
+    <span class="kind" data-kind="card">Greeting card</span>
+    <span class="kind" data-kind="blueprint">Blueprint</span>
     <span class="kind" data-kind="free">Freeform</span>
   </div>
 
@@ -123,7 +125,12 @@
         document.querySelectorAll(".kind").forEach((c) => c.classList.remove("sel"));
         chip.classList.add("sel");
         kind = chip.dataset.kind;
-        const names = { manga: "Untitled manga", anime: "Untitled illustration", poster: "Untitled poster", diagram: "Untitled diagram", free: "Untitled canvas" };
+        const names = {
+          manga: "Untitled manga", anime: "Untitled illustration",
+          coloring: "Untitled coloring book", poster: "Untitled poster",
+          card: "Untitled card", blueprint: "Untitled blueprint",
+          free: "Untitled canvas",
+        };
         const input = document.getElementById("project-name");
         if (input.value.startsWith("Untitled")) input.value = names[kind];
       });

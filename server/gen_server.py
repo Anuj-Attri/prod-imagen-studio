@@ -158,15 +158,17 @@ def gpu_prompt(prompt: str) -> str:
     return ", ".join([prompt.rstrip(" ,"), GPU_QUALITY_TAGS])
 
 
-def generate_gpu(prompt: str, seed: int, width: int, height: int) -> bytes:
+def generate_gpu(prompt: str, seed: int, width: int, height: int,
+                 negative: str = "") -> bytes:
     import io
     import torch
     pipe = gpu_pipeline()
+    full_negative = ", ".join(p for p in (negative.strip(" ,"), GPU_NEGATIVE) if p)
     with _gpu_run_lock:  # one generation at a time: the pipeline is stateful
         generator = torch.Generator("cuda").manual_seed(seed)
         image = pipe(
             prompt=prompt,
-            negative_prompt=GPU_NEGATIVE,
+            negative_prompt=full_negative,
             width=snap64(width), height=snap64(height),
             num_inference_steps=int(os.environ.get("LOCAL_IMAGE_STEPS", "28")),
             guidance_scale=float(os.environ.get("LOCAL_IMAGE_CFG", "5.0")),
@@ -470,6 +472,40 @@ AGENT_SYSTEM = (
     "dialogue or lists in the reply."
 )
 
+# The JSON contract is the same for every document type; what changes is
+# how many entries to return and what the dialogue list is used for.
+LAYOUT_DIRECTIVES = {
+    "panels": (
+        "This project is a comic page. Return 2 to 6 panels in reading "
+        "order. dialogue is speech and narration."
+    ),
+    "single": (
+        "This project is a single illustration, not a comic. Return "
+        "exactly ONE panel describing the whole picture. Use dialogue "
+        "for at most one short caption, or leave it empty."
+    ),
+    "poster": (
+        "This project is a poster. Return exactly ONE panel describing "
+        "the artwork, composed with clear empty space where the title "
+        "will sit. The dialogue list is the lettering: first entry is "
+        "the headline in a few words, then at most two short lines such "
+        "as a tagline or a date. Use kind text for all of them."
+    ),
+    "card": (
+        "This project is a greeting card front. Return exactly ONE panel "
+        "describing a charming, uncluttered illustration. The dialogue "
+        "list is the lettering: first entry is the greeting itself, "
+        "optionally one short line underneath. Use kind text."
+    ),
+    "blueprint": (
+        "This project is a technical blueprint or systems diagram, not "
+        "character art. Return exactly ONE panel describing the "
+        "schematic: the components, how they connect, the projection. "
+        "Never include people. The dialogue list is the callout labels, "
+        "up to eight short component names, kind caption."
+    ),
+}
+
 BUILD_HINT = (
     "You returned no panels. The user wants a page built. Return the "
     "JSON with 2 to 6 panels now, reply at most 15 words."
@@ -535,7 +571,8 @@ def agent_chat(payload: dict, current: dict) -> dict:
         for m in payload.get("messages", [])
         if m.get("role") in ("user", "assistant")
     ] or [{"role": "user", "content": "hello"}]
-    system = AGENT_SYSTEM + " Current project context: " + context
+    directive = LAYOUT_DIRECTIVES.get(payload.get("layout") or "panels", "")
+    system = AGENT_SYSTEM + " " + directive + " Current project context: " + context
     result = parse_agent_json(llm_chat(current, system, messages,
                                        max_tokens=1400, json_mode=True))
     if not result["panels"] and looks_like_build_request(messages):
@@ -667,7 +704,8 @@ class Handler(BaseHTTPRequestHandler):
             if engine == "local-gpu":
                 image = generate_gpu(prompt, seed,
                                      int(payload.get("width", 1024)),
-                                     int(payload.get("height", 1024)))
+                                     int(payload.get("height", 1024)),
+                                     str(payload.get("negative", "")))
             elif engine == "ideogram":
                 if not current["ideogram"]:
                     raise RuntimeError("Ideogram key missing")

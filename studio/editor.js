@@ -24,11 +24,30 @@ function parseProject() {
 }
 const project = parseProject();
 
+// Every document type is the same layered page underneath. What differs
+// is the paper size, the default look, and what "build me a page" means.
 const PAGE_SIZES = {
-  manga: { w: 900, h: 1273 }, anime: { w: 1024, h: 1024 },
-  poster: { w: 900, h: 1200 }, diagram: { w: 1100, h: 800 }, free: { w: 1000, h: 1000 },
+  manga: { w: 900, h: 1273 },      // B5 proportions
+  anime: { w: 1024, h: 1024 },
+  coloring: { w: 1000, h: 1294 },  // Letter
+  poster: { w: 900, h: 1200 },
+  card: { w: 1050, h: 750 },       // folded card, front panel
+  blueprint: { w: 1400, h: 990 },  // A3 landscape
+  diagram: { w: 1100, h: 800 },
+  free: { w: 1000, h: 1000 },
 };
 const PAGE = PAGE_SIZES[project.kind] || PAGE_SIZES.free;
+
+const KIND_RECIPES = {
+  manga: { layout: "panels", style: "manga" },
+  anime: { layout: "single", style: "anime" },
+  coloring: { layout: "single", style: "coloring" },
+  poster: { layout: "poster", style: "poster" },
+  card: { layout: "card", style: "card" },
+  blueprint: { layout: "blueprint", style: "blueprint" },
+  diagram: { layout: "blueprint", style: "blueprint" },
+  free: { layout: "panels", style: "anime" },
+};
 
 let doc = project.document || {
   version: 1,
@@ -71,9 +90,36 @@ const STYLE_PRESETS = {
     label: "Retro anime (80s)",
     tags: "1980s anime style, retro cel animation, film grain, muted retro colors",
   },
+  coloring: {
+    label: "Coloring book line art",
+    tags: "lineart, monochrome, coloring book page, thick clean outlines, "
+      + "white background, flat, uncoloured, simple shapes",
+    // a colour checkpoint will render a full painting unless colour and
+    // shading are pushed out explicitly
+    negative: "color, colored, colorful, shading, shadow, gradient, greyscale, "
+      + "screentone, painting, photorealistic, texture, detailed background",
+  },
+  poster: {
+    label: "Poster art",
+    tags: "poster art, bold graphic composition, strong silhouette, dramatic lighting, "
+      + "limited palette, negative space for a title",
+  },
+  card: {
+    label: "Greeting card",
+    tags: "greeting card illustration, charming, warm, decorative border, "
+      + "centred composition, cheerful palette",
+  },
+  blueprint: {
+    label: "Technical blueprint",
+    tags: "technical blueprint, schematic diagram, cyanotype blue background, "
+      + "white line drawing, orthographic projection, measured, precise",
+    negative: "1girl, 1boy, person, face, anime, character, painterly, "
+      + "colorful, photorealistic",
+  },
 };
+function recipe() { return KIND_RECIPES[doc.kind] || KIND_RECIPES.free; }
 doc.style = doc.style || {
-  preset: doc.kind === "manga" ? "manga" : "anime",
+  preset: (KIND_RECIPES[doc.kind] || KIND_RECIPES.free).style,
   extra: "",
   lockSeed: true,
   // "page": one render for the whole page, which cannot disagree with
@@ -1841,6 +1887,13 @@ function styleTags() {
   return [preset ? preset.tags : "", doc.style.extra].filter(Boolean).join(", ");
 }
 
+// Some looks are defined as much by what must be absent as by what is
+// present: a coloring page fails the moment the model adds colour.
+function styleNegative() {
+  const preset = STYLE_PRESETS[doc.style.preset];
+  return (preset && preset.negative) || "";
+}
+
 function castTags(names) {
   return (names || [])
     .map((name) => doc.cast.find((c) => c.name.toLowerCase() === String(name).toLowerCase()))
@@ -1879,6 +1932,7 @@ async function generatePanel(layer) {
       engine: document.getElementById("engine").value,
       prompt: composePrompt(layer), seed: panelSeed(layer),
       width: size.width, height: size.height, no_text: true,
+      negative: styleNegative(),
     }),
   });
   const result = await response.json();
@@ -2109,6 +2163,118 @@ function detectPanels(image, pageW, pageH) {
 
 // The agent's page plan: lay the page out here, create the layers, then
 // render each panel's art with the engine picked in the top bar.
+// A document that is not a comic is one artwork plus lettering, not a
+// grid of panels: a coloring page, a poster, a card front, a schematic.
+async function applyAgentArtwork(beats, layout) {
+  const names = [...new Set(beats.flatMap((b) => b.cast || []))];
+  const subject = beats.map((b) => String(b.prompt || "").trim()).filter(Boolean).join(", ");
+  const prompt = [castTags(names), subject, styleTags()].filter(Boolean).join(", ");
+
+  currentPage().layers = [];
+  selectedIds = [];
+
+  // A card keeps its lower third clear for the greeting.
+  const artBox = layout === "card"
+    ? { x: 0, y: 0, w: PAGE.w, h: Math.round(PAGE.h * 0.66) }
+    : { x: 0, y: 0, w: PAGE.w, h: PAGE.h };
+
+  const art = addLayer("image", artBox);
+  art.name = "Artwork";
+  art.locked = true;
+  art.props.prompt = prompt;
+
+  const lines = beats.flatMap((b) => b.dialogue || []).filter((d) => d && d.text);
+  placeArtworkText(layout, lines, artBox);
+  select(null);
+  renderCanvas();
+
+  if (!engineReady()) {
+    showNoEngine(true);
+    toast("Layout ready. No image engine configured.", true);
+    return;
+  }
+  setBusy("Rendering artwork");
+  try {
+    const size = renderSize(art);
+    const response = await fetch(`${SERVER}/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        engine: document.getElementById("engine").value,
+        prompt, seed: doc.style.lockSeed ? panelSeed(art) : null,
+        width: size.width, height: size.height, no_text: true,
+        negative: styleNegative(),
+      }),
+    });
+    const result = await response.json();
+    if (!result.ok) throw new Error(result.error || "generation failed");
+    art.props.image = "data:image/png;base64," + result.image_base64;
+    art.props.engineUsed = result.engine;
+    art.props.seedUsed = result.seed;
+    renderCanvas();
+    checkpoint(`${doc.kind}: artwork`);
+    toast(`Rendered in ${(result.latency_ms / 1000).toFixed(1)}s`);
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    setBusy(null);
+  }
+}
+
+// Titles, greetings and labels sit differently on each kind of document.
+function placeArtworkText(layout, lines, artBox) {
+  if (!lines.length) return;
+  const add = (kind, text, geo, props = {}) => {
+    const layer = addLayer(kind, geo);
+    layer.props.text = text;
+    Object.assign(layer.props, props);
+    return layer;
+  };
+  if (layout === "poster") {
+    const [title, ...rest] = lines;
+    add("text", title.text, {
+      x: Math.round(PAGE.w * 0.08), y: Math.round(PAGE.h * 0.74),
+      w: Math.round(PAGE.w * 0.84),
+    }, { fontSize: Math.round(PAGE.w * 0.11), fill: "#ffffff", align: "center", font: "Arial Black" });
+    rest.slice(0, 2).forEach((line, i) => {
+      add("text", line.text, {
+        x: Math.round(PAGE.w * 0.08), y: Math.round(PAGE.h * (0.87 + i * 0.05)),
+        w: Math.round(PAGE.w * 0.84),
+      }, { fontSize: Math.round(PAGE.w * 0.035), fill: "#ffffff", align: "center" });
+    });
+    return;
+  }
+  if (layout === "card") {
+    const [greeting, ...rest] = lines;
+    add("text", greeting.text, {
+      x: Math.round(PAGE.w * 0.08), y: artBox.h + Math.round(PAGE.h * 0.05),
+      w: Math.round(PAGE.w * 0.84),
+    }, { fontSize: Math.round(PAGE.w * 0.075), fill: "#111111", align: "center", font: "Georgia" });
+    rest.slice(0, 1).forEach((line) => {
+      add("text", line.text, {
+        x: Math.round(PAGE.w * 0.08), y: artBox.h + Math.round(PAGE.h * 0.19),
+        w: Math.round(PAGE.w * 0.84),
+      }, { fontSize: Math.round(PAGE.w * 0.03), fill: "#444444", align: "center" });
+    });
+    return;
+  }
+  if (layout === "blueprint") {
+    lines.slice(0, 8).forEach((line, i) => {
+      add("caption", line.text, {
+        x: Math.round(PAGE.w * 0.04),
+        y: Math.round(PAGE.h * (0.06 + i * 0.075)),
+        w: Math.round(PAGE.w * 0.26),
+      }, { fontSize: 15, bg: "#0d2b4e", color: "#e8f1ff", ink: "#7fb0e0" });
+    });
+    return;
+  }
+  // single artwork: one caption strip at the foot of the page
+  add("caption", lines[0].text, {
+    x: Math.round(PAGE.w * 0.06), y: Math.round(PAGE.h * 0.88),
+    w: Math.round(PAGE.w * 0.88),
+  }, { fontSize: 18 });
+}
+
 // Whole-page mode: one render for the entire page. A single diffusion
 // sample cannot disagree with itself, so the page reads as one artist.
 // Panel rectangles are recovered from the result and the lettering is
@@ -2151,6 +2317,7 @@ async function applyAgentPage(panels, cast) {
         engine: document.getElementById("engine").value,
         prompt: pagePrompt, seed: doc.style.lockSeed ? panelSeed(sheet) : null,
         width: 832, height: 1216, no_text: true,
+        negative: styleNegative(),
       }),
     });
     const result = await response.json();
@@ -2455,7 +2622,7 @@ async function sendChat() {
       body: JSON.stringify({
         messages: doc.chat.slice(-16), project: doc.name, kind: doc.kind,
         art_style: (STYLE_PRESETS[doc.style.preset] || {}).label,
-        cast: doc.cast, pages,
+        layout: recipe().layout, cast: doc.cast, pages,
       }),
     });
     const result = await response.json();
@@ -2465,7 +2632,9 @@ async function sendChat() {
     setBusy(null);
     mergeCast(result.cast);
     if (Array.isArray(result.panels) && result.panels.length) {
-      if (doc.style.pageMode !== "panels") await applyAgentPage(result.panels);
+      const layout = recipe().layout;
+      if (layout !== "panels") await applyAgentArtwork(result.panels, layout);
+      else if (doc.style.pageMode !== "panels") await applyAgentPage(result.panels);
       else await applyAgentPanels(result.panels, { replacePage: true });
     }
   } catch (error) {
