@@ -123,8 +123,12 @@ function waitForServer(port, timeoutMs) {
     }
   });
 
+  // Every server module, not a chosen two: routing, the bench and the
+  // reviewer were added later and were going unchecked, so a syntax
+  // error in any of them would have reached a build machine untouched.
   step("server compiles", () => python(["-m", "py_compile",
-    path.join("server", "gen_server.py"), path.join("server", "probe.py")]));
+    ...["gen_server.py", "probe.py", "routing.py", "bench.py", "review.py"]
+      .map((file) => path.join("server", file))]));
 
   step("renderer self-test", () => node([path.join("studio", "selftest.js")]));
   step("written files are what they claim", () =>
