@@ -193,7 +193,24 @@ def strip_reasoning(text: str) -> str:
     return text.strip()
 
 
-def llm_chat(current: dict, system: str, messages: list, max_tokens: int = 900) -> str:
+def ollama_base(cfg: dict):
+    # Ollama's native API enforces JSON output at the grammar level; the
+    # OpenAI-compat endpoint silently ignores response_format on many
+    # versions. Returns the native base URL if this endpoint is Ollama.
+    url = cfg["url"]
+    if not url.endswith("/v1"):
+        return None
+    base = url[:-3].rstrip("/")
+    try:
+        req = urllib.request.Request(base + "/api/version")
+        with urllib.request.urlopen(req, timeout=2) as r:
+            return base if r.status == 200 else None
+    except Exception:
+        return None
+
+
+def llm_chat(current: dict, system: str, messages: list, max_tokens: int = 900,
+             json_mode: bool = False) -> str:
     if local_llm_reachable(current):
         cfg = llm_config(current)
         available = local_models(cfg)
@@ -207,18 +224,40 @@ def llm_chat(current: dict, system: str, messages: list, max_tokens: int = 900) 
             model = (same_family or chat_capable or available)[0]
         if "qwen3" in model.lower():
             system = system + " /no_think"
+        full_messages = [{"role": "system", "content": system}] + messages
         try:
-            result = http_json(
-                cfg["url"] + "/chat/completions",
-                {
+            native = ollama_base(cfg) if json_mode else None
+            if native:
+                native_req = {
+                    "model": model, "stream": False, "format": "json",
+                    "think": False,  # skip reasoning: json needs speed, not deliberation
+                    "messages": full_messages,
+                    "options": {"num_predict": max(max_tokens, 4000)},
+                }
+                try:
+                    result = http_json(native + "/api/chat", native_req, {}, timeout=300)
+                except urllib.error.HTTPError:
+                    native_req.pop("think", None)  # model rejects the think switch
+                    result = http_json(native + "/api/chat", native_req, {}, timeout=300)
+                raw = result.get("message", {}).get("content", "")
+            else:
+                request = {
                     "model": model,
                     # local is free; headroom so reasoning cannot eat the reply
                     "max_tokens": max(max_tokens, 4000),
-                    "messages": [{"role": "system", "content": system}] + messages,
-                },
-                {}, timeout=180,
-            )
-            raw = result["choices"][0]["message"]["content"]
+                    "messages": full_messages,
+                }
+                if json_mode:
+                    request["response_format"] = {"type": "json_object"}
+                try:
+                    result = http_json(cfg["url"] + "/chat/completions", request, {}, timeout=180)
+                except urllib.error.HTTPError as error:
+                    if json_mode and error.code == 400:
+                        request.pop("response_format", None)  # server lacks json mode
+                        result = http_json(cfg["url"] + "/chat/completions", request, {}, timeout=180)
+                    else:
+                        raise
+                raw = result["choices"][0]["message"]["content"]
             reply = strip_reasoning(raw)
             if not reply:
                 raise RuntimeError(
@@ -278,17 +317,9 @@ def analyze_story(payload: dict, current: dict) -> dict:
         "pages": payload.get("pages", []),
         "previous_analysis": payload.get("previous", {}),
     })
-    result = http_json(
-        "https://api.anthropic.com/v1/messages",
-        {
-            "model": os.environ.get("STORY_MODEL", "claude-sonnet-5"),
-            "max_tokens": 1200,
-            "system": STORY_SYSTEM,
-            "messages": [{"role": "user", "content": content}],
-        },
-        {"x-api-key": api_key, "anthropic-version": "2023-06-01"},
-        timeout=120,
-    )
+    text = llm_chat(current, STORY_SYSTEM,
+                    [{"role": "user", "content": content}],
+                    max_tokens=1200, json_mode=True)
     if text.startswith("```"):
         text = text.strip("`").lstrip("json").strip()
     parsed = json.loads(text)
@@ -308,19 +339,55 @@ def analyze_story(payload: dict, current: dict) -> dict:
 
 
 AGENT_SYSTEM = (
-    "You are the built-in agent of prod-imagen studio, a canvas tool "
-    "for manga, anime, and illustration projects. You receive the user's "
-    "pages (panel prompts and dialogue) as context. Help with: panel prompt "
-    "writing, dialogue and lettering, page composition and pacing, story "
-    "beats, style direction. Be concise and concrete; suggest exact prompt "
-    "text the user can paste. Plain text only, no markdown."
+    "You are the page director inside prod-imagen studio, a layered "
+    "canvas tool for manga, anime, posters and illustration. You do not "
+    "just talk: you BUILD pages. You always answer with raw JSON, no "
+    "markdown, no code fences, in exactly this shape: "
+    '{"reply": "one or two sentences for the user", "panels": [{"x": 0, '
+    '"y": 0, "w": 0, "h": 0, "prompt": "detailed art prompt: subject, '
+    'action, camera angle, lighting, style; never any lettering or text '
+    'in the image", "dialogue": [{"kind": "balloon", "text": "SHORT '
+    'line", "x": 0, "y": 0}]}]}. '
+    "dialogue kind is balloon, caption or sfx. Coordinates are page "
+    "pixels; the page size is in the context. Panels must tile the page "
+    "with 12 to 24 px gutters and must not overlap. Balloons go inside "
+    "their panel near the speaker's head space; captions at panel top or "
+    "bottom edges; sfx overlap the action, 1 or 2 loud words. "
+    "When the user describes a scene, page or story beat, return 2 to 6 "
+    "panels that stage it with strong pacing. When they ask a plain "
+    "question and no page should be built, return \"panels\": []. "
+    "Keep the reply short: what you built and one directorial note."
 )
 
 
-def agent_chat(payload: dict, current: dict) -> str:
+def parse_agent_json(text: str) -> dict:
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`")
+        if cleaned[:4].lower() == "json":
+            cleaned = cleaned[4:]
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            data = json.loads(cleaned[start:end + 1])
+            if isinstance(data, dict) and "reply" in data:
+                panels = data.get("panels")
+                return {
+                    "reply": str(data["reply"]),
+                    "panels": panels if isinstance(panels, list) else [],
+                }
+        except Exception:
+            pass
+    # model ignored the contract: degrade to a plain text reply
+    return {"reply": text, "panels": []}
+
+
+def agent_chat(payload: dict, current: dict) -> dict:
     context = json.dumps({
         "project": payload.get("project"),
         "kind": payload.get("kind"),
+        "page_size": payload.get("page_size"),
         "pages": payload.get("pages", []),
     })
     messages = [
@@ -328,8 +395,9 @@ def agent_chat(payload: dict, current: dict) -> str:
         for m in payload.get("messages", [])
         if m.get("role") in ("user", "assistant")
     ] or [{"role": "user", "content": "hello"}]
-    return llm_chat(current, AGENT_SYSTEM + " Current project context: " + context,
-                    messages, max_tokens=700)
+    text = llm_chat(current, AGENT_SYSTEM + " Current project context: " + context,
+                    messages, max_tokens=1600, json_mode=True)
+    return parse_agent_json(text)
 
 
 # -------------------------------------------------------------------- server --
@@ -442,7 +510,7 @@ class Handler(BaseHTTPRequestHandler):
     def _chat(self, payload: dict) -> None:
         current = keys()
         try:
-            self._json(200, {"ok": True, "reply": agent_chat(payload, current)})
+            self._json(200, {"ok": True, **agent_chat(payload, current)})
         except Exception as error:
             self._json(500, {"error": f"{type(error).__name__}: {error}"})
 

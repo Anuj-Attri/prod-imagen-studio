@@ -111,6 +111,9 @@ const ICONS = {
   arrow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 19.5L18 6M18 6h-6M18 6v6"/></svg>',
   star: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3.5l2.5 5.4 5.9.6-4.4 4 1.2 5.8-5.2-3-5.2 3 1.2-5.8-4.4-4 5.9-.6L12 3.5z"/></svg>',
 };
+// Rail shows the common tools; the five shapes collapse into one
+// flyout entry (Adobe-style tool group). Shortcuts still reach every
+// shape directly.
 const TOOL_DEFS = [
   ["select", "Select / move", "V"],
   ["draw", "Brush", "D"],
@@ -122,14 +125,18 @@ const TOOL_DEFS = [
   ["caption", "Caption box", "C"],
   ["text", "Title text", "T"],
   ["sfx", "Onomatopoeia / SFX", "S"],
+];
+const SHAPE_DEFS = [
   ["rect", "Rectangle", "R"],
   ["ellipse", "Ellipse", "O"],
   ["line", "Line", "L"],
   ["arrow", "Arrow", "A"],
   ["star", "Star", "W"],
 ];
+const SHAPE_IDS = SHAPE_DEFS.map(([id]) => id);
 const SHAPE_TOOLS = ["rect", "ellipse", "star"];
 const STROKE_TOOLS = ["line", "arrow"];
+let lastShape = "rect";
 const toolRail = document.getElementById("tools");
 TOOL_DEFS.forEach(([id, label, key]) => {
   const el = document.createElement("div");
@@ -139,6 +146,33 @@ TOOL_DEFS.forEach(([id, label, key]) => {
   el.addEventListener("click", () => setTool(id));
   toolRail.appendChild(el);
 });
+const shapesBtn = document.createElement("div");
+shapesBtn.className = "tool";
+shapesBtn.id = "shapes-tool";
+shapesBtn.innerHTML = ICONS[lastShape] + '<span class="flyout-mark"></span>' +
+  '<span class="tip">Shapes · R O L A W</span>';
+toolRail.appendChild(shapesBtn);
+const shapeMenu = document.createElement("div");
+shapeMenu.id = "shape-menu";
+shapeMenu.innerHTML = SHAPE_DEFS.map(([id, label, key]) =>
+  `<div class="shape-item" data-shape="${id}">${ICONS[id]}<span>${label}</span><span class="key">${key}</span></div>`).join("");
+document.body.appendChild(shapeMenu);
+shapesBtn.addEventListener("click", (event) => {
+  event.stopPropagation();
+  if (shapeMenu.classList.contains("show")) { shapeMenu.classList.remove("show"); return; }
+  const rect = shapesBtn.getBoundingClientRect();
+  shapeMenu.style.left = rect.right + 8 + "px";
+  shapeMenu.style.top = rect.top + "px";
+  shapeMenu.classList.add("show");
+});
+shapeMenu.querySelectorAll(".shape-item").forEach((item) => {
+  item.addEventListener("click", (event) => {
+    event.stopPropagation();
+    shapeMenu.classList.remove("show");
+    setTool(item.dataset.shape);
+  });
+});
+document.addEventListener("click", () => shapeMenu.classList.remove("show"));
 
 // ---------------------------------------------------------------- konva --
 const wrap = document.getElementById("canvas-wrap");
@@ -1016,8 +1050,15 @@ function editTextInline(node, layer) {
 function setTool(name) {
   if (name === "image") { document.getElementById("image-file").click(); return; }
   tool = name;
+  const isShape = SHAPE_IDS.includes(name);
   document.querySelectorAll(".tool").forEach((b) =>
     b.classList.toggle("active", b.dataset.tool === name));
+  if (isShape) {
+    lastShape = name;
+    shapesBtn.innerHTML = ICONS[name] + '<span class="flyout-mark"></span>' +
+      '<span class="tip">Shapes · R O L A W</span>';
+  }
+  shapesBtn.classList.toggle("active", isShape);
   stage.container().style.cursor = name === "select" ? "" : "crosshair";
   renderOptions();
 }
@@ -1353,6 +1394,32 @@ async function loadEngines() {
   }
 }
 
+function engineReady() {
+  const select_ = document.getElementById("engine");
+  const option = select_.selectedOptions[0];
+  return Boolean(select_.value && option && !option.disabled && select_.value !== "server offline");
+}
+
+async function generatePanel(layer) {
+  const response = await fetch(`${SERVER}/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      engine: document.getElementById("engine").value,
+      prompt: layer.props.prompt, seed: layer.props.seed,
+      width: 1024, height: 1024, no_text: true,
+    }),
+  });
+  const result = await response.json();
+  if (!result.ok) throw new Error(result.error || "generation failed");
+  layer.props.image = "data:image/png;base64," + result.image_base64;
+  layer.props.engineUsed = result.engine;
+  layer.props.seedUsed = result.seed;
+  delete layer.props.crop;
+  renderCanvas();
+  return result;
+}
+
 document.getElementById("generate").onclick = async () => {
   const layer = primaryLayer();
   if (!layer || layer.type !== "panel") return;
@@ -1360,26 +1427,11 @@ document.getElementById("generate").onclick = async () => {
     toast("Write a prompt in Properties first");
     return;
   }
-  const engine = document.getElementById("engine").value;
   const button = document.getElementById("generate");
   button.disabled = true;
   button.textContent = "Generating…";
   try {
-    const response = await fetch(`${SERVER}/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        engine, prompt: layer.props.prompt, seed: layer.props.seed,
-        width: 1024, height: 1024, no_text: true,
-      }),
-    });
-    const result = await response.json();
-    if (!result.ok) throw new Error(result.error || "generation failed");
-    layer.props.image = "data:image/png;base64," + result.image_base64;
-    layer.props.engineUsed = result.engine;
-    layer.props.seedUsed = result.seed;
-    delete layer.props.crop;
-    renderCanvas();
+    const result = await generatePanel(layer);
     select(layer.id);
     commit();
     toast(`${layer.name} · ${result.engine} · ${(result.latency_ms / 1000).toFixed(1)}s`);
@@ -1390,6 +1442,67 @@ document.getElementById("generate").onclick = async () => {
     button.textContent = "Generate";
   }
 };
+
+// The agent's page plan: create the layers it staged, then render each
+// panel's art with the engine picked in the top bar.
+const clampNum = (v, lo, hi, fallback) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n))) : fallback;
+};
+function agentGrid(index, total) {
+  const cols = total > 1 ? 2 : 1;
+  const rows = Math.ceil(total / cols);
+  const g = 16;
+  const w = Math.floor((PAGE.w - g * (cols + 1)) / cols);
+  const h = Math.floor((PAGE.h - g * (rows + 1)) / rows);
+  return {
+    x: g + (index % cols) * (w + g),
+    y: g + Math.floor(index / cols) * (h + g),
+    w, h,
+  };
+}
+async function applyAgentPanels(panels) {
+  const created = [];
+  panels.slice(0, 8).forEach((p, i) => {
+    const grid = agentGrid(i, Math.min(panels.length, 8));
+    const geo = {
+      x: clampNum(p.x, 0, PAGE.w - 80, grid.x),
+      y: clampNum(p.y, 0, PAGE.h - 80, grid.y),
+      w: clampNum(p.w, 80, PAGE.w, grid.w),
+      h: clampNum(p.h, 80, PAGE.h, grid.h),
+    };
+    if (geo.x + geo.w > PAGE.w) geo.w = PAGE.w - geo.x;
+    if (geo.y + geo.h > PAGE.h) geo.h = PAGE.h - geo.y;
+    const layer = addLayer("panel", geo);
+    layer.props.prompt = String(p.prompt || "").slice(0, 2000);
+    created.push(layer);
+    (Array.isArray(p.dialogue) ? p.dialogue : []).slice(0, 6).forEach((d) => {
+      const kind = ["balloon", "caption", "sfx"].includes(d.kind) ? d.kind : "balloon";
+      const dl = addLayer(kind, {
+        x: clampNum(d.x, 0, PAGE.w - 60, geo.x + 24),
+        y: clampNum(d.y, 0, PAGE.h - 40, geo.y + 24),
+      });
+      dl.props.text = String(d.text || "").slice(0, 300);
+    });
+  });
+  select(null);
+  renderCanvas();
+  commit();
+  if (!engineReady()) {
+    toast(`${created.length} panels staged. Pick an engine to render the art.`, true);
+    return;
+  }
+  for (let i = 0; i < created.length; i += 1) {
+    toast(`Rendering panel ${i + 1}/${created.length}…`);
+    try {
+      await generatePanel(created[i]);
+    } catch (error) {
+      toast(`Panel ${i + 1}: ${error.message}`, true);
+    }
+  }
+  commit();
+  toast("Page rendered");
+}
 
 // ----------------------------------------------------------------- story --
 document.getElementById("story-analyze").onclick = async () => {
@@ -1527,12 +1640,18 @@ async function sendChat() {
     const response = await fetch(`${SERVER}/agent/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: doc.chat.slice(-16), project: doc.name, kind: doc.kind, pages }),
+      body: JSON.stringify({
+        messages: doc.chat.slice(-16), project: doc.name, kind: doc.kind,
+        page_size: { w: PAGE.w, h: PAGE.h }, pages,
+      }),
     });
     const result = await response.json();
     if (!result.ok) throw new Error(result.error || "agent unavailable");
     thinking.textContent = result.reply;
     doc.chat.push({ role: "assistant", content: result.reply });
+    if (Array.isArray(result.panels) && result.panels.length) {
+      applyAgentPanels(result.panels); // builds layers, then renders art
+    }
   } catch (error) {
     thinking.textContent = "Agent offline: " + error.message;
   }

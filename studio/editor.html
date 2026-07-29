@@ -26,6 +26,14 @@
       --grain-opacity: 0.03;
     }
     * { box-sizing: border-box; margin: 0; user-select: none; }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb {
+      background: var(--hairline-strong); border-radius: 4px;
+      border: 2px solid transparent; background-clip: padding-box;
+    }
+    ::-webkit-scrollbar-thumb:hover { background: var(--ink-3); background-clip: padding-box; }
+    ::-webkit-scrollbar-corner, ::-webkit-scrollbar-button { background: transparent; height: 0; width: 0; }
     input, textarea, select, .msg, .story-block, #chat-log, .prop-note {
       user-select: text !important; -webkit-user-select: text !important;
     }
@@ -97,6 +105,24 @@
       opacity: 0; pointer-events: none; transition: opacity 120ms; z-index: 40;
     }
     .tool:hover .tip { opacity: 1; }
+    .tool .flyout-mark {
+      position: absolute; right: 4px; bottom: 4px; width: 0; height: 0;
+      border-left: 4px solid transparent; border-bottom: 4px solid currentColor;
+      opacity: 0.5;
+    }
+    #shape-menu {
+      position: fixed; z-index: 60; display: none; flex-direction: column; gap: 2px;
+      background: var(--surface-2); border: 1px solid var(--hairline-strong);
+      border-radius: 9px; padding: 4px; box-shadow: var(--page-bloom); min-width: 138px;
+    }
+    #shape-menu.show { display: flex; }
+    .shape-item {
+      display: flex; align-items: center; gap: 9px; padding: 6px 10px 6px 8px;
+      border-radius: 6px; cursor: pointer; color: var(--ink-2); font-size: 12px;
+    }
+    .shape-item:hover { background: var(--surface-3); color: var(--ink); }
+    .shape-item svg { width: 15px; height: 15px; flex: none; }
+    .shape-item .key { margin-left: auto; color: var(--ink-3); font-size: 10.5px; }
     /* ===== canvas + overlay ===== */
     #canvas-wrap { grid-area: canvas; overflow: hidden; position: relative; background: var(--bg); }
     #canvas-overlay { grid-area: canvas; position: relative; pointer-events: none; z-index: 10; }
