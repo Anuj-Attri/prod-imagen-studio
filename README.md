@@ -1,9 +1,10 @@
 # prod-imagen studio
 
-A layered canvas studio for visual stories: manga pages, anime
-illustrations, posters and diagrams. Figma-style layers, exact vector
-lettering, generated art from a local GPU or a hosted API, and a
-directing agent that lays out whole pages.
+A layered canvas studio for visual stories. One tool for a manga
+chapter, a coloring book, a poster, a greeting card and a systems
+blueprint: Figma-style layers, exact vector lettering, art generated on
+your own GPU or through a hosted API, and a directing agent that lays
+out whole pages rather than handing back a prompt.
 
 > Source-available under the PolyForm Noncommercial License 1.0.0.
 > Personal and noncommercial use is free; commercial licensing is
