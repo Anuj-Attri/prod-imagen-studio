@@ -214,6 +214,149 @@ check("a locked layer cannot be dragged", () => {
   return nodes.get(layer.id).draggable() === false;
 });
 
+// "drag and drop" also means the layer list and dropping files in
+check("layer list drop lands above or below as aimed", () => {
+  currentPage().layers = [];
+  const bottom = addLayer("rect", { x: 0, y: 0, w: 20, h: 20 });
+  const middle = addLayer("rect", { x: 30, y: 0, w: 20, h: 20 });
+  const top = addLayer("rect", { x: 60, y: 0, w: 20, h: 20 });
+  bottom.name = "bottom"; middle.name = "middle"; top.name = "top";
+  renderLayerList();
+
+  const row = [...document.querySelectorAll("#layer-list .layer-row")]
+    .find((r) => r.querySelector(".name").textContent === "top");
+  const box = row.getBoundingClientRect();
+  const event = new Event("drop", { bubbles: true });
+  event.dataTransfer = { getData: () => bottom.id };
+  event.clientY = box.top + 2;          // aimed at the upper half
+  row.dispatchEvent(event);
+
+  // the list is drawn top down while the model is bottom up, so
+  // dropping above the topmost row must place it last in the model
+  const order = currentPage().layers.map((l) => l.name).join(",");
+  return order === "middle,top,bottom" ? true : "order was " + order;
+});
+
+check("dropping image files onto the canvas adds layers", async () => {
+  currentPage().layers = [];
+  const bytes = Uint8Array.from(atob(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+  ), (c) => c.charCodeAt(0));
+  const file = new File([bytes], "drop.png", { type: "image/png" });
+  placeImageFiles([file]);
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  const images = currentPage().layers.filter((l) => l.type === "image");
+  return images.length === 1 && String(images[0].props.image).startsWith("data:image");
+});
+
+check("a dropped file that is not an image is ignored", async () => {
+  currentPage().layers = [];
+  const note = new File(["hello"], "notes.txt", { type: "text/plain" });
+  placeImageFiles([note]);
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  return currentPage().layers.length === 0;
+});
+
+// every shortcut must reach the tool the status bar advertises
+check("keyboard shortcuts select their tool", () => {
+  const wanted = {
+    v: "select", d: "draw", e: "eraser", i: "picker", p: "panel",
+    b: "balloon", c: "caption", t: "text", s: "sfx",
+    r: "rect", o: "ellipse", l: "line", a: "arrow", w: "star",
+  };
+  const wrong = [];
+  Object.entries(wanted).forEach(([key, expected]) => {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+    if (tool !== expected) wrong.push(key + " gave " + tool);
+  });
+  setTool("select");
+  return wrong.length === 0 ? true : wrong.join(", ");
+});
+
+// The canvas tools: dragging on the page is how most layers get made,
+// and none of it had been exercised.
+function dragOnStage(from, to, steps) {
+  const real = stage.getPointerPosition;
+  let at = from;
+  stage.getPointerPosition = () => at;
+  stage.fire("mousedown", { target: stage, evt: { button: 0 } });
+  const count = steps || 3;
+  for (let i = 1; i <= count; i += 1) {
+    at = {
+      x: from.x + ((to.x - from.x) * i) / count,
+      y: from.y + ((to.y - from.y) * i) / count,
+    };
+    stage.fire("mousemove", { target: stage, evt: {} });
+  }
+  at = to;
+  stage.fire("mouseup", { target: stage, evt: {} });
+  stage.getPointerPosition = real;
+}
+
+check("each drawing tool creates its layer by dragging", () => {
+  zoom = 1;
+  world.position({ x: 0, y: 0 });
+  applyView();
+  const wrong = [];
+  [["panel", "panel"], ["rect", "rect"], ["ellipse", "ellipse"],
+   ["star", "star"], ["line", "line"], ["arrow", "arrow"]].forEach(([toolName, type]) => {
+    currentPage().layers = [];
+    setTool(toolName);
+    dragOnStage({ x: 40, y: 40 }, { x: 200, y: 170 });
+    const made = currentPage().layers[0];
+    if (!made || made.type !== type) {
+      wrong.push(toolName + " gave " + (made ? made.type : "nothing"));
+    }
+  });
+  setTool("select");
+  return wrong.length === 0 ? true : wrong.join(", ");
+});
+
+check("a dragged shape takes the dragged geometry", () => {
+  currentPage().layers = [];
+  setTool("rect");
+  dragOnStage({ x: 60, y: 50 }, { x: 260, y: 190 });
+  setTool("select");
+  const made = currentPage().layers[0];
+  return made && Math.abs(made.x - 60) < 2 && Math.abs(made.y - 50) < 2
+    && Math.abs(made.w - 200) < 3 && Math.abs(made.h - 140) < 3;
+});
+
+check("the brush records a stroke", () => {
+  currentPage().layers = [];
+  setTool("draw");
+  dragOnStage({ x: 20, y: 20 }, { x: 180, y: 120 }, 6);
+  setTool("select");
+  const stroke = currentPage().layers[0];
+  return stroke && stroke.type === "draw" && stroke.props.points.length >= 8;
+});
+
+check("the eraser removes a stroke it passes over", () => {
+  currentPage().layers = [];
+  setTool("draw");
+  dragOnStage({ x: 40, y: 40 }, { x: 200, y: 40 }, 5);
+  setTool("select");
+  if (currentPage().layers.length !== 1) return "no stroke to erase";
+  pageLayer.draw();
+  setTool("eraser");
+  dragOnStage({ x: 100, y: 40 }, { x: 140, y: 40 }, 3);
+  setTool("select");
+  return currentPage().layers.length === 0;
+});
+
+check("a marquee selects what it covers", () => {
+  currentPage().layers = [];
+  const inside = addLayer("rect", { x: 60, y: 60, w: 60, h: 60 });
+  const outside = addLayer("rect", { x: 400, y: 400, w: 60, h: 60 });
+  select(null);
+  setTool("select");
+  dragOnStage({ x: 30, y: 30 }, { x: 200, y: 200 }, 4);
+  const picked = selectedIds.slice();
+  return picked.length === 1 && picked[0] === inside.id
+    ? true : "selected " + picked.length + " (outside included: "
+      + picked.includes(outside.id) + ")";
+});
+
 // layout engine
 check("templates yield their panel count", () => {
   for (let n = 1; n <= 8; n += 1) if (pageLayout(n).length !== n) return "n=" + n;
