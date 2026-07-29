@@ -360,6 +360,12 @@ check("a marquee selects what it covers", () => {
 // A fresh install has no server: the app must still work and must say
 // why the parts that need one are unavailable.
 check("an offline server is explained, not just implied", () => {
+  // the notice stands down once a page has art or an engine is usable,
+  // and whether one is usable depends on the machine this runs on
+  currentPage().layers = [];
+  const engine = document.getElementById("engine");
+  const had = engine.innerHTML;
+  engine.innerHTML = "<option>server offline</option>";
   serverReachable = false;
   showNoEngine(true);
   const box = document.getElementById("no-engine");
@@ -367,13 +373,19 @@ check("an offline server is explained, not just implied", () => {
   const says = box.querySelector("b").textContent;
   const detail = box.querySelector("p").textContent;
   serverReachable = true;
+  engine.innerHTML = had;
   return shown && says.includes("not running")
     && detail.includes("Drawing") && detail.includes("Settings");
 });
 check("a reachable server with no keys says something different", () => {
+  currentPage().layers = [];
+  const engine = document.getElementById("engine");
+  const had = engine.innerHTML;
+  engine.innerHTML = "<option disabled>needs key</option>";
   serverReachable = true;
   showNoEngine(true);
   const says = document.getElementById("no-engine").querySelector("b").textContent;
+  engine.innerHTML = had;
   return says.includes("No image engine");
 });
 check("editing works with no server at all", () => {
@@ -413,6 +425,39 @@ check("the server address and token are configurable", () => {
   // the trailing slash must not produce a doubled separator
   return sawUrl === "https://example.invalid/studio/health"
     && sawAuth === "Bearer secret-token";
+});
+
+// Building several pages at once was shipped without a check. A
+// coloring book is the reason it exists.
+check("build more pages repeats the last brief", async () => {
+  doc.chat.length = 0;
+  doc.chat.push({ role: "user", content: "a dragon having tea with rabbits" });
+  const sent = [];
+  const realSend = window.sendChat;
+  window.sendChat = async (text, quiet) => { sent.push({ text, quiet }); };
+  await generateMorePages(3);
+  window.sendChat = realSend;
+  if (sent.length !== 3) return "asked " + sent.length + " times, wanted 3";
+  // the original brief is carried, and each round is told to vary
+  const every = sent.every((s) => s.text.includes("dragon having tea")
+    && s.text.includes("different scene") && s.quiet === true);
+  return every ? true : "brief or variation instruction missing";
+});
+check("build more pages refuses with nothing to repeat", async () => {
+  doc.chat.length = 0;
+  const sent = [];
+  const realSend = window.sendChat;
+  window.sendChat = async () => { sent.push(1); };
+  await generateMorePages(2);
+  window.sendChat = realSend;
+  return sent.length === 0;
+});
+check("build more pages is clamped to something sane", () => {
+  const input = document.getElementById("more-count");
+  input.value = "999";
+  const asked = Math.min(Math.max(parseInt(input.value, 10) || 1, 1), 12);
+  input.value = "3";
+  return asked === 12;
 });
 
 // layout engine
