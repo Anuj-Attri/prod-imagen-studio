@@ -1685,6 +1685,59 @@ check("undo restores", () => {
   return currentPage().layers.length === n;
 });
 
+check("a long poster title does not run through its own subtitles", () => {
+  resetForCheck("poster");
+  placeArtworkText("poster", [
+    { text: "Apple Silicon Caching Power And Unified Memory Architecture" },
+    { text: "Dynamic Caching Explained" },
+    { text: "Unified Memory Architecture" },
+  ], { x: 0, y: 0, w: PAGE.w, h: Math.round(PAGE.h * 0.8) });
+
+  const type = currentPage().layers.filter((l) => l.type === "text");
+  if (type.length !== 3) return "expected a title and two subtitles, got " + type.length;
+  const boxes = type.map((l) => ({
+    name: l.props.text.slice(0, 18),
+    top: l.y,
+    bottom: l.y + textBlockHeight(l.props.text, l.props.fontSize,
+      l.props.font || "Segoe UI", l.w),
+  })).sort((a, b) => a.top - b.top);
+
+  for (let i = 1; i < boxes.length; i += 1) {
+    if (boxes[i].top < boxes[i - 1].bottom) {
+      return JSON.stringify(boxes[i - 1].name) + " ends at " + boxes[i - 1].bottom
+        + " but " + JSON.stringify(boxes[i].name) + " starts at " + boxes[i].top;
+    }
+  }
+  const last = boxes[boxes.length - 1];
+  return last.bottom <= PAGE.h ? true
+    : "the block runs " + (last.bottom - PAGE.h) + "px past the foot of the page";
+});
+
+check("the style travels with a generation request, so the right model renders it", async () => {
+  resetForCheck("poster");
+  const art = addLayer("panel", { x: 0, y: 0, w: 512, h: 512 });
+  art.props.prompt = "cache hierarchy diagram";
+  doc.style.preset = "poster";
+
+  let sent = null;
+  const realFetch = window.fetch;
+  window.fetch = async (url, options) => {
+    if (String(url).includes("/generate")) {
+      sent = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ ok: false, error: "stopped here" }) };
+    }
+    return realFetch(url, options);
+  };
+  try {
+    await generatePanel(art).catch(() => {});
+  } finally {
+    window.fetch = realFetch;
+  }
+  if (!sent) return "no request was made";
+  return sent.style === "poster" ? true
+    : "the request carried style " + JSON.stringify(sent.style);
+});
+
 runChecks().then(() => {
   document.title = "SELFTEST " + JSON.stringify(window.__results);
 });

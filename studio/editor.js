@@ -2716,7 +2716,7 @@ async function generatePanel(layer) {
       engine: document.getElementById("engine").value,
       prompt: composePrompt(layer), seed: panelSeed(layer),
       width: size.width, height: size.height, no_text: true,
-      negative: styleNegative(),
+      negative: styleNegative(), style: doc.style.preset,
     }),
   });
   const result = await response.json();
@@ -3088,7 +3088,7 @@ async function applyAgentArtwork(beats, layout) {
         engine: document.getElementById("engine").value,
         prompt, seed: doc.style.lockSeed ? panelSeed(art) : null,
         width: size.width, height: size.height, no_text: true,
-        negative: styleNegative(),
+        negative: styleNegative(), style: doc.style.preset,
       }),
     });
     const result = await response.json();
@@ -3181,6 +3181,29 @@ function buildCardInside(lines) {
   goToPage(front);        // leave the front showing, as it would be seen
 }
 
+// How tall a run of type will be once it wraps inside a given width.
+// Konva only knows after it has laid the text out, which is too late to
+// decide where the next block goes, so the same wrapping is worked out
+// here against a measuring context.
+const textRuler = document.createElement("canvas").getContext("2d");
+function textBlockHeight(text, fontSize, font, boxWidth, lineHeight = 1.2) {
+  textRuler.font = `${fontSize}px "${font}"`;
+  const words = String(text || "").split(/\s+/).filter(Boolean);
+  if (!words.length) return Math.ceil(fontSize * lineHeight);
+  let rows = 1;
+  let used = 0;
+  for (const word of words) {
+    const width = textRuler.measureText(word + " ").width;
+    if (used > 0 && used + width > boxWidth) {
+      rows += 1;
+      used = width;
+    } else {
+      used += width;
+    }
+  }
+  return Math.ceil(rows * fontSize * lineHeight);
+}
+
 // Titles, greetings and labels sit differently on each kind of document.
 function placeArtworkText(layout, lines, artBox) {
   if (!lines.length) return;
@@ -3191,16 +3214,43 @@ function placeArtworkText(layout, lines, artBox) {
     return layer;
   };
   if (layout === "poster") {
+    // A title that wraps to three lines is three times as tall as one
+    // that does not. Placing the subtitles at fixed fractions of the
+    // page assumed a height nobody had measured, so a long title ran
+    // straight through them.
     const [title, ...rest] = lines;
-    add("text", title.text, {
-      x: Math.round(PAGE.w * 0.08), y: Math.round(PAGE.h * 0.74),
-      w: Math.round(PAGE.w * 0.84),
-    }, { fontSize: Math.round(PAGE.w * 0.11), fill: "#ffffff", align: "center", font: "Arial Black" });
-    rest.slice(0, 2).forEach((line, i) => {
-      add("text", line.text, {
-        x: Math.round(PAGE.w * 0.08), y: Math.round(PAGE.h * (0.87 + i * 0.05)),
-        w: Math.round(PAGE.w * 0.84),
-      }, { fontSize: Math.round(PAGE.w * 0.035), fill: "#ffffff", align: "center" });
+    const x = Math.round(PAGE.w * 0.08);
+    const w = Math.round(PAGE.w * 0.84);
+    const subSize = Math.round(PAGE.w * 0.035);
+    const gap = Math.round(PAGE.h * 0.015);
+    const subs = rest.slice(0, 2);
+    const subHeights = subs.map((line) =>
+      textBlockHeight(line.text, subSize, "Segoe UI", w));
+    const subTotal = subHeights.reduce((sum, h) => sum + h + gap, 0);
+
+    // The band the words may occupy: above the foot of the page, and
+    // never climbing past the middle of the artwork. A title too long
+    // to fit is set smaller rather than allowed to overrun, which is
+    // what a person laying this out by hand would do.
+    const foot = PAGE.h - Math.round(PAGE.h * 0.05);
+    const ceiling = Math.round(PAGE.h * 0.42);
+    let titleSize = Math.round(PAGE.w * 0.11);
+    let titleHeight = textBlockHeight(title.text, titleSize, "Arial Black", w);
+    const smallest = Math.round(PAGE.w * 0.04);
+    while (titleSize > smallest
+           && foot - subTotal - titleHeight < ceiling) {
+      titleSize -= 2;
+      titleHeight = textBlockHeight(title.text, titleSize, "Arial Black", w);
+    }
+    const total = titleHeight + subTotal;
+    let y = Math.max(ceiling, foot - total);
+    add("text", title.text, { x, y, w },
+      { fontSize: titleSize, fill: "#ffffff", align: "center", font: "Arial Black" });
+    y += titleHeight + gap;
+    subs.forEach((line, i) => {
+      add("text", line.text, { x, y, w },
+        { fontSize: subSize, fill: "#ffffff", align: "center" });
+      y += subHeights[i] + gap;
     });
     return;
   }
@@ -3283,7 +3333,7 @@ async function applyAgentPage(panels, cast) {
         engine: document.getElementById("engine").value,
         prompt: pagePrompt, seed: doc.style.lockSeed ? panelSeed(sheet) : null,
         width: 832, height: 1216, no_text: true,
-        negative: styleNegative(),
+        negative: styleNegative(), style: doc.style.preset,
       }),
     });
     const result = await response.json();

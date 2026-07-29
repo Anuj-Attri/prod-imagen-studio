@@ -78,17 +78,49 @@ def http_get_bytes(url: str, timeout: int = 300) -> bytes:
 # diffusers. Requires the server to run under an interpreter with a CUDA
 # build of torch (see .venv-image); otherwise it stays unavailable and
 # the hosted engines are used instead.
-GPU_MODEL = os.environ.get("LOCAL_IMAGE_MODEL", "cagliostrolab/animagine-xl-4.0")
+# Two checkpoints, because no single one does both jobs. An anime SDXL
+# is tag-driven and renders everything as character illustration, which
+# is right for a manga page and wrong for a technical poster: asked for
+# a caching diagram it produces a person standing in a corridor. A
+# general SDXL takes plain description and holds photographic, graphic
+# and diagrammatic subjects.
+GPU_MODELS = {
+    "anime": os.environ.get("LOCAL_IMAGE_MODEL", "cagliostrolab/animagine-xl-4.0"),
+    "general": os.environ.get("LOCAL_IMAGE_MODEL_GENERAL",
+                              "stabilityai/stable-diffusion-xl-base-1.0"),
+}
+GPU_MODEL = GPU_MODELS["anime"]      # the drawn family, named for callers
+
+# Styles that want the drawn checkpoint. Anything unlisted is general,
+# so a style added later cannot silently inherit an anime model.
+ANIME_STYLES = {"manga", "anime", "manhwa", "noir", "sketch"}
+
+
+def family_for(style: str) -> str:
+    return "anime" if str(style or "").strip().lower() in ANIME_STYLES else "general"
+
+
 # Anime SDXL checkpoints are tag-driven and expect a trailing quality
 # block; without it the same prompt renders flat and often loses the
-# subject entirely.
+# subject entirely. A general checkpoint wants none of that vocabulary.
 GPU_QUALITY_TAGS = "masterpiece, best quality, very aesthetic, absurdres"
+GPU_QUALITY = {
+    "anime": GPU_QUALITY_TAGS,
+    "general": "high detail, sharp focus, professional lighting",
+}
 GPU_NEGATIVE = os.environ.get(
     "LOCAL_IMAGE_NEGATIVE",
     "lowres, worst quality, low quality, bad anatomy, bad hands, extra digits, "
     "fewer digits, jpeg artifacts, signature, watermark, username, text, "
     "speech bubble, caption, letters, blurry",
 )
+# A general checkpoint still drifts towards illustration unless told not
+# to, which is what made every poster look drawn.
+GPU_NEGATIVE_FAMILY = {
+    "anime": "",
+    "general": "anime, manga, cartoon, comic, cel shading, chibi, "
+               "character illustration",
+}
 _gpu_pipe = None
 _gpu_lock = threading.Lock()
 # A diffusers pipeline is NOT thread safe: concurrent calls share the
@@ -106,48 +138,63 @@ def gpu_capable() -> bool:
         return False
 
 
-def gpu_model_present() -> bool:
+def gpu_model_present(family: str = "anime") -> bool:
     # Weights are cached by huggingface_hub; presence means no surprise
     # multi-gigabyte download on the first click.
     try:
         from huggingface_hub import try_to_load_from_cache
-        hit = try_to_load_from_cache(GPU_MODEL, "model_index.json")
+        hit = try_to_load_from_cache(GPU_MODELS.get(family, GPU_MODEL),
+                                     "model_index.json")
         return isinstance(hit, str)
     except Exception:
         return False
 
 
 def gpu_available() -> bool:
-    return gpu_capable() and gpu_model_present()
+    return gpu_capable() and any(gpu_model_present(f) for f in GPU_MODELS)
 
 
-def gpu_pipeline():
+def gpu_pipeline(family: str = "anime"):
+    """The pipeline for one family, keeping only that one on the card.
+
+    Both checkpoints together do not fit beside the activations on a
+    16 GB card, so switching family evicts the resident one rather than
+    holding both and failing partway through a page.
+    """
     global _gpu_pipe
+    if family not in GPU_MODELS:
+        family = "anime"
     with _gpu_lock:
-        if _gpu_pipe is None:
-            import torch
-            from diffusers import StableDiffusionXLPipeline
-            _gpu_state["loading"] = True
-            try:
-                # diffusers ignores a bare dtype= kwarg: torch_dtype is
-                # the one that actually takes effect
-                pipe = StableDiffusionXLPipeline.from_pretrained(
-                    GPU_MODEL, torch_dtype=torch.float16, use_safetensors=True,
-                    add_watermarker=False,
-                )
-                pipe = pipe.to("cuda")
-                pipe.set_progress_bar_config(disable=True)
-                # keeps peak VRAM well inside a 16 GB card at 1024 px
-                pipe.vae.enable_tiling()
-                if pipe.dtype != torch.float16:
-                    raise RuntimeError(f"expected fp16 pipeline, got {pipe.dtype}")
-                _gpu_pipe = pipe
-                _gpu_state["error"] = None
-            except Exception as error:
-                _gpu_state["error"] = str(error)
-                raise
-            finally:
-                _gpu_state["loading"] = False
+        if _gpu_pipe is not None and _gpu_state.get("family") == family:
+            return _gpu_pipe
+        import torch
+        from diffusers import StableDiffusionXLPipeline
+        _gpu_state["loading"] = True
+        try:
+            if _gpu_pipe is not None:
+                _gpu_pipe = None
+                torch.cuda.empty_cache()
+            # diffusers ignores a bare dtype= kwarg: torch_dtype is
+            # the one that actually takes effect
+            pipe = StableDiffusionXLPipeline.from_pretrained(
+                GPU_MODELS[family], torch_dtype=torch.float16,
+                use_safetensors=True, add_watermarker=False,
+            )
+            pipe = pipe.to("cuda")
+            pipe.set_progress_bar_config(disable=True)
+            # keeps peak VRAM well inside a 16 GB card at 1024 px
+            pipe.vae.enable_tiling()
+            if pipe.dtype != torch.float16:
+                raise RuntimeError(f"expected fp16 pipeline, got {pipe.dtype}")
+            _gpu_pipe = pipe
+            _gpu_state["family"] = family
+            _gpu_state["error"] = None
+        except Exception as error:
+            _gpu_state["family"] = None
+            _gpu_state["error"] = str(error)
+            raise
+        finally:
+            _gpu_state["loading"] = False
         return _gpu_pipe
 
 
@@ -156,18 +203,22 @@ def snap64(value: int, lo: int = 512, hi: int = 1536) -> int:
     return max(lo, min(hi, round(value / 64) * 64))
 
 
-def gpu_prompt(prompt: str) -> str:
+def gpu_prompt(prompt: str, family: str = "anime") -> str:
     # The project supplies cast and style tags; only the checkpoint's own
-    # quality block belongs here.
-    return ", ".join([prompt.rstrip(" ,"), GPU_QUALITY_TAGS])
+    # quality block belongs here, and the two families want different
+    # vocabulary entirely.
+    return ", ".join([prompt.rstrip(" ,"),
+                      GPU_QUALITY.get(family, GPU_QUALITY_TAGS)])
 
 
 def generate_gpu(prompt: str, seed: int, width: int, height: int,
-                 negative: str = "") -> bytes:
+                 negative: str = "", family: str = "anime") -> bytes:
     import io
     import torch
-    pipe = gpu_pipeline()
-    full_negative = ", ".join(p for p in (negative.strip(" ,"), GPU_NEGATIVE) if p)
+    pipe = gpu_pipeline(family)
+    full_negative = ", ".join(p for p in (
+        negative.strip(" ,"), GPU_NEGATIVE,
+        GPU_NEGATIVE_FAMILY.get(family, "")) if p)
     with _gpu_run_lock:  # one generation at a time: the pipeline is stateful
         generator = torch.Generator("cuda").manual_seed(seed)
         try:
@@ -786,10 +837,11 @@ class Handler(BaseHTTPRequestHandler):
         if engine not in KNOWN_ENGINES:
             self._json(400, {"error": f"unknown engine: {engine}"})
             return
+        family = family_for(payload.get("style"))
         if engine == "local-gpu":
             # tag-driven checkpoint: the negative prompt already bars
             # lettering, so the prose no-text clause would only dilute it
-            prompt = gpu_prompt(prompt)
+            prompt = gpu_prompt(prompt, family)
         elif payload.get("no_text"):
             prompt = prompt + NO_TEXT_SUFFIX
         seed = payload.get("seed")
@@ -800,7 +852,8 @@ class Handler(BaseHTTPRequestHandler):
                 image = generate_gpu(prompt, seed,
                                      int(payload.get("width", 1024)),
                                      int(payload.get("height", 1024)),
-                                     str(payload.get("negative", "")))
+                                     str(payload.get("negative", "")),
+                                     family)
             elif engine == "ideogram":
                 if not current["ideogram"]:
                     raise RuntimeError("Ideogram key missing")
