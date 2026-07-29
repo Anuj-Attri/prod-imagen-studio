@@ -18,7 +18,8 @@ if (!window.studio) {
   window.studio = {
     openProject: unavailable, saveProjectDialog: unavailable, writeFile: unavailable,
     readFileDialog: unavailable, exportPngDialog: unavailable, chooseFolder: unavailable,
-    writePng: unavailable, newProjectWindow: unavailable, openProjectFile: unavailable,
+    writePng: unavailable, exportPdf: unavailable,
+    newProjectWindow: unavailable, openProjectFile: unavailable,
     saveKeys: unavailable, loadKeys: async () => ({}), win: () => {}, onMenu: null,
   };
 }
@@ -2798,34 +2799,63 @@ function renderPageToDataUrl() {
   return url;
 }
 
-document.getElementById("export-all").onclick = async () => {
-  const folder = await window.studio.chooseFolder();
-  if (!folder) return;
+// Walk every page through the canvas, snapshotting each, then put the
+// document back exactly as the user left it.
+async function forEachPageSnapshot(onPage) {
   const startPage = pageIndex;
   const startSelection = [...selectedIds];
-  setBusy("Exporting pages");
-  let written = 0;
   try {
     for (let i = 0; i < doc.pages.length; i += 1) {
       pageIndex = i;
       selectedIds = [];
       renderCanvas();
       // let queued image decodes finish before snapshotting
-      await new Promise((resolve) => setTimeout(resolve, 120));
-      setBusy(`Exporting page ${i + 1} of ${doc.pages.length}`);
-      const name = `${doc.name}-p${String(i + 1).padStart(2, "0")}.png`;
-      await window.studio.writePng(`${folder}/${name}`, renderPageToDataUrl());
-      written += 1;
+      await new Promise((resolve) => setTimeout(resolve, 140));
+      setBusy(`Rendering page ${i + 1} of ${doc.pages.length}`);
+      await onPage(renderPageToDataUrl(), i);
     }
-  } catch (error) {
-    toast(error.message, true);
   } finally {
     pageIndex = startPage;
     selectedIds = startSelection;
     renderCanvas();
+  }
+}
+
+document.getElementById("export-all").onclick = async () => {
+  const folder = await window.studio.chooseFolder();
+  if (!folder) return;
+  setBusy("Exporting pages");
+  let written = 0;
+  try {
+    await forEachPageSnapshot(async (dataUrl, index) => {
+      const name = `${doc.name}-p${String(index + 1).padStart(2, "0")}.png`;
+      await window.studio.writePng(`${folder}/${name}`, dataUrl);
+      written += 1;
+    });
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
     setBusy(null);
   }
   if (written) toast(`Exported ${written} page${written === 1 ? "" : "s"} to ${folder}`);
+};
+
+document.getElementById("export-pdf").onclick = async () => {
+  setBusy("Building PDF");
+  const images = [];
+  try {
+    await forEachPageSnapshot((dataUrl) => { images.push(dataUrl); });
+    setBusy("Writing PDF");
+    const saved = await window.studio.exportPdf({
+      suggestedName: `${doc.name}.pdf`,
+      widthPx: PAGE.w, heightPx: PAGE.h, images,
+    });
+    if (saved) toast(`Exported ${images.length} pages to ${saved}`);
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    setBusy(null);
+  }
 };
 
 document.getElementById("export").onclick = async () => {
@@ -3068,6 +3098,7 @@ const MENU_ACTIONS = {
   "page-add": () => addPage(false),
   "page-dupe": () => addPage(true),
   "export-all": () => document.getElementById("export-all").click(),
+  "export-pdf": () => document.getElementById("export-pdf").click(),
   "analyze-story": () => document.getElementById("story-analyze").click(),
 };
 
@@ -3079,7 +3110,8 @@ const MENUS = [
     ["Save", "save", "Ctrl+S"],
     ["Save As...", "save-as", "Ctrl+Shift+S"],
     ["Export Page as PNG...", "export", "Ctrl+E"],
-    ["Export All Pages...", "export-all"],
+    ["Export All Pages as PNG...", "export-all"],
+    ["Export Chapter as PDF...", "export-pdf"],
   ]],
   ["Edit", [
     ["Undo", "undo", "Ctrl+Z"],

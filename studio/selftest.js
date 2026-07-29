@@ -12,12 +12,17 @@ const html = fs.readFileSync(path.join(here, "editor.html"), "utf-8");
 const CHECKS = `
 <script>
 window.__results = [];
-function check(name, fn) {
-  try {
-    const value = fn();
-    window.__results.push([name, value === true ? "pass" : "FAIL(" + value + ")"]);
-  } catch (error) {
-    window.__results.push([name, "THREW " + error.message]);
+const __checks = [];
+// checks may be async: the export path walks pages through the canvas
+function check(name, fn) { __checks.push([name, fn]); }
+async function runChecks() {
+  for (const [name, fn] of __checks) {
+    try {
+      const value = await fn();
+      window.__results.push([name, value === true ? "pass" : "FAIL(" + value + ")"]);
+    } catch (error) {
+      window.__results.push([name, "THREW " + error.message]);
+    }
   }
 }
 
@@ -177,6 +182,21 @@ check("connectors span between boxes", () => {
   return Math.abs(x2 - x1) > 10 || Math.abs(y2 - y1) > 10;
 });
 
+// export
+check("snapshot walk covers every page and restores position", async () => {
+  addPage(false);
+  addPage(false);
+  goToPage(1);
+  const seen = [];
+  await forEachPageSnapshot((dataUrl, index) => {
+    if (!String(dataUrl).startsWith("data:image/png")) throw new Error("bad snapshot");
+    seen.push(index);
+  });
+  return seen.length === doc.pages.length && pageIndex === 1;
+});
+check("pdf export is reachable", () =>
+  !!document.getElementById("export-pdf") && typeof window.studio.exportPdf === "function");
+
 // history
 check("named checkpoints recorded", () => {
   checkpoint("Test checkpoint");
@@ -189,7 +209,9 @@ check("undo restores", () => {
   return currentPage().layers.length === n;
 });
 
-document.title = "SELFTEST " + JSON.stringify(window.__results);
+runChecks().then(() => {
+  document.title = "SELFTEST " + JSON.stringify(window.__results);
+});
 </script>
 `;
 

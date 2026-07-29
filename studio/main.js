@@ -190,6 +190,45 @@ ipcMain.handle("export-png-dialog", async (_e, suggestedName, dataUrl) => {
   return result.filePath;
 });
 
+// A chapter is delivered as one document. The pages are already
+// rasterised by the renderer; this lays them out one per sheet in an
+// offscreen window and prints that to PDF at the page's real size.
+ipcMain.handle("export-pdf", async (_e, { suggestedName, widthPx, heightPx, images }) => {
+  const result = await dialog.showSaveDialog({
+    defaultPath: suggestedName,
+    filters: [{ name: "PDF document", extensions: ["pdf"] }],
+  });
+  if (result.canceled) return null;
+
+  const inches = (px) => px / 96;
+  const body = images.map((src) =>
+    `<div class="sheet"><img src="${src}"></div>`).join("");
+  const html = `<!doctype html><meta charset="utf-8"><style>
+    @page { size: ${inches(widthPx)}in ${inches(heightPx)}in; margin: 0; }
+    html, body { margin: 0; padding: 0; background: #fff; }
+    .sheet {
+      width: ${inches(widthPx)}in; height: ${inches(heightPx)}in;
+      page-break-after: always; overflow: hidden;
+    }
+    .sheet:last-child { page-break-after: auto; }
+    .sheet img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  </style>${body}`;
+
+  const sheet = new BrowserWindow({ show: false, webPreferences: { offscreen: true } });
+  try {
+    await sheet.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
+    const pdf = await sheet.webContents.printToPDF({
+      printBackground: true,
+      pageSize: { width: inches(widthPx) * 25400, height: inches(heightPx) * 25400 },
+      margins: { marginType: "none" },
+    });
+    fs.writeFileSync(result.filePath, pdf);
+    return result.filePath;
+  } finally {
+    sheet.destroy();
+  }
+});
+
 ipcMain.handle("choose-folder", async () => {
   const result = await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] });
   return result.canceled || !result.filePaths.length ? null : result.filePaths[0];
