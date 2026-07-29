@@ -36,6 +36,10 @@ KEYS_PATH = Path(__file__).with_name("keys.json")
 AUTH_TOKEN = os.environ.get("STUDIO_AUTH_TOKEN")
 
 NO_TEXT_SUFFIX = ", no text, no letters, no speech balloons, no captions, no watermarks"
+# This server is meant to be deployable, so requests are bounded and a
+# bad one is answered plainly rather than with an internal error.
+MAX_PROMPT = 8000
+KNOWN_ENGINES = ("local-gpu", "ideogram", "openai-image", "bfl-flux")
 
 
 def keys() -> dict:
@@ -597,10 +601,15 @@ def agent_chat(payload: dict, current: dict) -> dict:
         "story_so_far": payload.get("story"),
         "pages": payload.get("pages", []),
     })
+    # Anything may arrive over the wire: a string where a list belongs, or
+    # entries that are not objects. Neither should become a 500.
+    raw_messages = payload.get("messages")
+    if not isinstance(raw_messages, list):
+        raw_messages = []
     messages = [
-        {"role": m.get("role", "user"), "content": str(m.get("content", ""))}
-        for m in payload.get("messages", [])
-        if m.get("role") in ("user", "assistant")
+        {"role": m.get("role", "user"), "content": str(m.get("content", ""))[:MAX_PROMPT]}
+        for m in raw_messages
+        if isinstance(m, dict) and m.get("role") in ("user", "assistant")
     ] or [{"role": "user", "content": "hello"}]
     directive = LAYOUT_DIRECTIVES.get(payload.get("layout") or "panels", "")
     system = AGENT_SYSTEM + " " + directive + " Current project context: " + context
@@ -762,10 +771,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def _generate(self, payload: dict) -> None:
         current = keys()
-        engine = payload.get("engine", "ideogram")
+        engine = str(payload.get("engine", "ideogram"))
         prompt = str(payload.get("prompt", "")).strip()
         if not prompt:
             self._json(400, {"error": "prompt is required"})
+            return
+        if len(prompt) > MAX_PROMPT:
+            self._json(400, {"error": f"prompt is longer than {MAX_PROMPT} characters"})
+            return
+        if engine not in KNOWN_ENGINES:
+            self._json(400, {"error": f"unknown engine: {engine}"})
             return
         if engine == "local-gpu":
             # tag-driven checkpoint: the negative prompt already bars
