@@ -25,6 +25,7 @@
    which is a mistake worth making impossible rather than remembering.
 */
 const { execFileSync, spawn } = require("child_process");
+const net = require("net");
 const fs = require("fs");
 const http = require("http");
 const path = require("path");
@@ -57,11 +58,27 @@ function python(args) {
   execFileSync(exe, args, { cwd: root, stdio: "pipe", encoding: "utf-8" });
 }
 
-function waitForServer(timeoutMs) {
+// A port the operating system says is free right now. Checking used to
+// assume the usual one was idle, so running it while the application was
+// open left the checking server unable to bind: the probe then talked to
+// the running application instead, and the whole run hung with nothing
+// printed. Asking for a port rather than assuming one removes the clash.
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.on("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
+function waitForServer(port, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
     const attempt = () => {
-      http.get({ host: "127.0.0.1", port: 8787, path: "/health", timeout: 1000 },
+      http.get({ host: "127.0.0.1", port, path: "/health", timeout: 1000 },
         (response) => {
           response.resume();
           resolve();
@@ -115,13 +132,19 @@ function waitForServer(timeoutMs) {
   // The probe needs a server. Start one that reaches nothing, which is
   // what a build machine has anyway, and stop it afterwards.
   const exe = process.platform === "win32" ? "python" : "python3";
+  const port = await freePort();
   const server = spawn(exe, ["-m", "server.gen_server"], {
     cwd: root, stdio: "ignore",
-    env: { ...process.env, LLM_BASE_URL: "http://127.0.0.1:9" },
+    env: { ...process.env, LLM_BASE_URL: "http://127.0.0.1:9",
+           STUDIO_PORT: String(port) },
   });
   try {
-    await waitForServer(20000);
-    step("server rejects bad input", () => python([path.join("server", "probe.py")]));
+    await waitForServer(port, 20000);
+    // the probe reads the same variable, so both ends agree on the port
+    step("server rejects bad input", () => execFileSync(exe,
+      [path.join("server", "probe.py")],
+      { cwd: root, stdio: "pipe", encoding: "utf-8",
+        env: { ...process.env, STUDIO_PORT: String(port) } }));
   } catch (error) {
     console.error(`  server probe ... SKIPPED (${error.message})`);
   } finally {

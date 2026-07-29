@@ -7,11 +7,15 @@ plainly, must never drop the connection, and must never hand back the
 name of an internal error.
 """
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
 
-BASE = "http://127.0.0.1:8787"
+# The port is not fixed. A checking run starts its own server on a free
+# port so that it never collides with one already open on the machine,
+# which used to make the whole run hang with no explanation.
+BASE = "http://127.0.0.1:" + os.environ.get("STUDIO_PORT", "8787")
 
 
 def call(path, body=None, raw=None, method="POST"):

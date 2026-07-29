@@ -1719,6 +1719,14 @@ check("the style travels with a generation request, so the right model renders i
   art.props.prompt = "cache hierarchy diagram";
   doc.style.preset = "poster";
 
+  // Whether an engine is on offer depends on a server this check must
+  // not need. Naming one directly keeps the check about the request that
+  // gets built, which is the thing being examined.
+  const chooser = document.getElementById("engine");
+  const before = chooser.innerHTML;
+  chooser.innerHTML = "<option value='local-gpu'>local</option>";
+  chooser.value = "local-gpu";
+
   let sent = null;
   const realFetch = window.fetch;
   window.fetch = async (url, options) => {
@@ -1732,6 +1740,7 @@ check("the style travels with a generation request, so the right model renders i
     await generatePanel(art).catch(() => {});
   } finally {
     window.fetch = realFetch;
+    chooser.innerHTML = before;
   }
   if (!sent) return "no request was made";
   return sent.style === "poster" ? true
