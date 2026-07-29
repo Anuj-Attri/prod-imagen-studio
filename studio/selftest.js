@@ -1050,6 +1050,42 @@ check("half a cast entry is dropped rather than half kept", () => {
   return doc.cast.length === 2 && doc.cast[1].name === "Oni" && doc.cast[1].tags === "";
 });
 
+// The recovery chain has been checked at both ends: that the prompt
+// appears, and that the file is written atomically. What was never
+// checked is the part in between, whether what gets written can be
+// opened again with the work still in it.
+check("what autosave writes is a project that reopens", () => {
+  currentPage().layers = [];
+  doc.name = "Recovered chapter";
+  doc.cast = [{ id: "c1", name: "Rin", tags: "1girl, long black hair" }];
+  doc.style.preset = "noir";
+  const panel = addLayer("panel", { x: 10, y: 20, w: 300, h: 200 });
+  panel.props.prompt = "1girl, standing, temple steps";
+  panel.props.cast = ["Rin"];
+  addLayer("balloon", { x: 40, y: 50 }).props.text = "This ends today.";
+
+  let reopened;
+  try {
+    reopened = JSON.parse(autosavePayload()).document;
+  } catch (error) {
+    return "what would be written is not readable: " + error.message;
+  }
+  normalizeDocument(reopened);
+  const layers = reopened.pages[0].layers;
+  const back = layers.find((l) => l.type === "panel");
+  const said = layers.find((l) => l.type === "balloon");
+  if (!back || back.props.prompt !== "1girl, standing, temple steps") return "the panel did not survive";
+  if (!said || said.props.text !== "This ends today.") return "the lettering did not survive";
+  if (reopened.style.preset !== "noir") return "the style did not survive";
+  return reopened.cast[0] && reopened.cast[0].tags === "1girl, long black hair"
+    ? true : "the cast did not survive";
+});
+check("a recovery copy carries no path, so saving it asks where", () => {
+  const payload = JSON.parse(autosavePayload());
+  // recovered work must not silently overwrite the older file on disk
+  return payload._path === undefined;
+});
+
 // layout engine
 check("templates yield their panel count", () => {
   for (let n = 1; n <= 8; n += 1) if (pageLayout(n).length !== n) return "n=" + n;

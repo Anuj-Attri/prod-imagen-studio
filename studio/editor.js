@@ -341,15 +341,23 @@ let autosaveTimer = null;
 
 // A crash takes everything the close guard would have caught. While there
 // is unsaved work, keep a recovery copy on disk; a clean exit removes it.
+const AUTOSAVE_AFTER_MS = 20000;
+
+// What a recovery copy contains, separate from when it is written, so
+// the contents can be examined without waiting for a timer.
+function autosavePayload() {
+  const payload = { ...project, name: doc.name, document: doc };
+  delete payload._path;
+  return JSON.stringify(payload);
+}
+
 function scheduleAutosave() {
   if (!window.studio || !window.studio.autosave) return;
   clearTimeout(autosaveTimer);
   autosaveTimer = setTimeout(() => {
     if (savedSnapshot === snapshotDoc()) return;   // nothing at risk
-    const payload = { ...project, name: doc.name, document: doc };
-    delete payload._path;
-    window.studio.autosave(JSON.stringify(payload));
-  }, 20000);
+    window.studio.autosave(autosavePayload());
+  }, AUTOSAVE_AFTER_MS);
 }
 function markDirtyState() {
   const dirty = savedSnapshot !== snapshotDoc();
