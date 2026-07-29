@@ -577,6 +577,49 @@ check("properties of a damaged layer can still be shown", () => {
   return document.getElementById("props-body").innerHTML.length > 0;
 });
 
+// Images arrive from a camera, a download, or a truncated render, and
+// none of those are the tidy case.
+check("an unreadable image says so instead of leaving a blank frame", async () => {
+  currentPage().layers = [];
+  const layer = addLayer("panel", { x: 0, y: 0, w: 200, h: 150 });
+  layer.props.image = "data:image/png;base64,this-is-not-an-image";
+  renderCanvas();
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const placeholder = nodes.get(layer.id).findOne(".placeholder");
+  return findLayer(layer.id).props.imageBroken === true
+    && placeholder.visible() === true
+    && placeholder.text().includes("could not be read");
+});
+
+check("an oversized import is scaled down before it is stored", async () => {
+  // 4000 across, far beyond anything a page can show
+  const canvas = document.createElement("canvas");
+  canvas.width = 4000; canvas.height = 1000;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#3366aa";
+  context.fillRect(0, 0, 4000, 1000);
+  const huge = canvas.toDataURL("image/png");
+
+  const probe = new window.Image();
+  await new Promise((resolve) => { probe.onload = resolve; probe.src = huge; });
+  const stored = downscaleIfHuge(huge, 4000, 1000, probe);
+  if (stored === huge) return "not scaled";
+
+  const after = new window.Image();
+  await new Promise((resolve) => { after.onload = resolve; after.src = stored; });
+  return after.naturalWidth === MAX_IMPORT_EDGE && stored.length < huge.length;
+});
+
+check("an image within the limit is stored untouched", async () => {
+  const canvas = document.createElement("canvas");
+  canvas.width = 600; canvas.height = 400;
+  canvas.getContext("2d").fillRect(0, 0, 600, 400);
+  const modest = canvas.toDataURL("image/png");
+  const probe = new window.Image();
+  await new Promise((resolve) => { probe.onload = resolve; probe.src = modest; });
+  return downscaleIfHuge(modest, 600, 400, probe) === modest;
+});
+
 // layout engine
 check("templates yield their panel count", () => {
   for (let n = 1; n <= 8; n += 1) if (pageLayout(n).length !== n) return "n=" + n;

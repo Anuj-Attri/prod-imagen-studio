@@ -993,7 +993,21 @@ function applyFlip(node, layer) {
 
 function attachImage(group, layer) {
   const image = new window.Image();
+  image.onerror = () => {
+    // a truncated render or a damaged file otherwise leaves an empty
+    // frame with nothing to say why
+    layer.props.imageBroken = true;
+    const placeholder = group.findOne(".placeholder");
+    if (placeholder) {
+      placeholder.text(`${layer.name}
+this image could not be read`);
+      placeholder.visible(true);
+    }
+    pageLayer.batchDraw();
+    toast(`${layer.name}: image could not be read`, true);
+  };
   image.onload = () => {
+    delete layer.props.imageBroken;
     const old = group.findOne(".art");
     if (old) old.destroy();
     // The art must take pointer events: with a hidden or unfilled frame
@@ -2262,19 +2276,43 @@ wrap.addEventListener("drop", (event) => {
   const files = [...event.dataTransfer.files].filter((f) => f.type.startsWith("image/"));
   if (files.length) placeImageFiles(files);
 });
+// Nothing on a page needs more resolution than twice the page itself.
+// A photograph straight from a camera is many times that, and every byte
+// of it would be carried in the project file and in every export.
+const MAX_IMPORT_EDGE = 2400;
+
+function downscaleIfHuge(source, naturalWidth, naturalHeight, probe) {
+  const longest = Math.max(naturalWidth, naturalHeight);
+  if (longest <= MAX_IMPORT_EDGE) return source;
+  const scale = MAX_IMPORT_EDGE / longest;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(naturalWidth * scale);
+  canvas.height = Math.round(naturalHeight * scale);
+  canvas.getContext("2d").drawImage(probe, 0, 0, canvas.width, canvas.height);
+  try {
+    return canvas.toDataURL("image/png");
+  } catch {
+    return source;      // tainted canvas: keep the original
+  }
+}
+
 function placeImageFiles(files) {
   files.filter((f) => f.type.startsWith("image/")).forEach((file, index) => {
     const reader = new FileReader();
+    reader.onerror = () => toast(`${file.name}: could not be read`, true);
     reader.onload = () => {
       const probe = new window.Image();
+      probe.onerror = () => toast(`${file.name}: not a readable image`, true);
       probe.onload = () => {
+        const stored = downscaleIfHuge(reader.result,
+          probe.naturalWidth, probe.naturalHeight, probe);
         const maxW = PAGE.w * 0.6, maxH = PAGE.h * 0.6;
         const scale = Math.min(maxW / probe.naturalWidth, maxH / probe.naturalHeight, 1);
         addLayer("image", {
           x: 80 + index * 24, y: 80 + index * 24,
           w: Math.round(probe.naturalWidth * scale),
           h: Math.round(probe.naturalHeight * scale),
-        }, { image: reader.result });
+        }, { image: stored });
       };
       probe.src = reader.result;
     };
