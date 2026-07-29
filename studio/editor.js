@@ -18,7 +18,8 @@ if (!window.studio) {
   window.studio = {
     openProject: unavailable, saveProjectDialog: unavailable, writeFile: unavailable,
     readFileDialog: unavailable, exportPngDialog: unavailable, chooseFolder: unavailable,
-    writePng: unavailable, exportPdf: unavailable,
+    writePng: unavailable, exportPdf: unavailable, autosave: unavailable,
+    setUnsaved: () => {}, closeNow: () => {},
     newProjectWindow: unavailable, openProjectFile: unavailable,
     saveKeys: unavailable, loadKeys: async () => ({}), win: () => {}, onMenu: null,
   };
@@ -244,10 +245,25 @@ function checkpoint(label) { commit(label); }
 
 // The main process asks before closing only if it knows work is at risk.
 let savedSnapshot = null;
+let autosaveTimer = null;
+
+// A crash takes everything the close guard would have caught. While there
+// is unsaved work, keep a recovery copy on disk; a clean exit removes it.
+function scheduleAutosave() {
+  if (!window.studio || !window.studio.autosave) return;
+  clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(() => {
+    if (savedSnapshot === snapshotDoc()) return;   // nothing at risk
+    const payload = { ...project, name: doc.name, document: doc };
+    delete payload._path;
+    window.studio.autosave(JSON.stringify(payload));
+  }, 20000);
+}
 function markDirtyState() {
   const dirty = savedSnapshot !== snapshotDoc();
   document.getElementById("save").textContent = dirty ? "Save *" : "Save";
   if (window.studio && window.studio.setUnsaved) window.studio.setUnsaved(dirty);
+  if (dirty) scheduleAutosave();
 }
 function restore(entry) {
   const chat = doc.chat;

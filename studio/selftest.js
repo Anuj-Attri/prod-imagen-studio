@@ -423,6 +423,21 @@ check("dirty state ignores chat, which is not project work", () => {
   return document.getElementById("save").textContent === "Save";
 });
 
+check("autosave is armed only while work is at risk", () => {
+  let asked = 0;
+  const realAutosave = window.studio.autosave;
+  window.studio.autosave = () => { asked += 1; };
+  savedSnapshot = snapshotDoc();
+  markDirtyState();                      // clean: nothing scheduled
+  const cleanTimer = autosaveTimer;
+  addLayer("rect", { x: 1, y: 1, w: 5, h: 5 });
+  commit("dirty now");                   // dirty: a save is scheduled
+  const armed = autosaveTimer !== cleanTimer && autosaveTimer !== null;
+  clearTimeout(autosaveTimer);
+  window.studio.autosave = realAutosave;
+  return armed && asked === 0;           // scheduled, not yet fired
+});
+
 // rulers and guides
 check("rulers render page coordinates", () => {
   document.body.classList.add("rulers-on");

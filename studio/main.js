@@ -4,6 +4,20 @@ const fs = require("fs");
 
 const editorWindows = new Set();
 let launcherWindow = null;
+
+// Recovery copies of dirty documents. A clean exit deletes its own file,
+// so anything still here on the next launch is work a crash took.
+const recoveryDir = path.join(app.getPath("userData"), "recovery");
+function recoveryPath(id) { return path.join(recoveryDir, `session-${id}.dimg`); }
+function listRecoveries() {
+  try {
+    return fs.readdirSync(recoveryDir)
+      .filter((name) => name.endsWith(".dimg"))
+      .map((name) => path.join(recoveryDir, name));
+  } catch {
+    return [];
+  }
+}
 // Renderers report whether they hold unsaved work, so closing a window
 // can ask rather than discard an afternoon of it.
 const unsaved = new Map();
@@ -60,6 +74,8 @@ function createEditor(project, opts = {}) {
   win.on("closed", () => {
     unsaved.delete(win.id);
     editorWindows.delete(win);
+    // closed on purpose, so its recovery copy is no longer wanted
+    try { fs.unlinkSync(recoveryPath(win.id)); } catch { /* none written */ }
   });
   // Opening from the launcher consumes it; File > New keeps it around.
   if (launcherWindow && !opts.keepLauncher) {
@@ -182,6 +198,17 @@ ipcMain.on("unsaved", (event, isDirty) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (win) unsaved.set(win.id, Boolean(isDirty));
 });
+ipcMain.handle("autosave", (event, contents) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return false;
+  try {
+    fs.mkdirSync(recoveryDir, { recursive: true });
+    fs.writeFileSync(recoveryPath(win.id), contents, "utf-8");
+    return true;
+  } catch {
+    return false;   // a failed recovery write must never break editing
+  }
+});
 ipcMain.on("close-now", (event) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return;
@@ -293,8 +320,36 @@ app.whenReady().then(() => {
     } catch (_) { /* updater unavailable in dev */ }
   }
   buildMenu();
+  offerRecovery();
   createLauncher();
 });
+
+// Anything left in the recovery folder was not closed cleanly.
+function offerRecovery() {
+  const files = listRecoveries();
+  if (!files.length) return;
+  const choice = dialog.showMessageBoxSync({
+    type: "question",
+    buttons: files.length === 1 ? ["Recover", "Discard"] : ["Recover all", "Discard"],
+    defaultId: 0,
+    cancelId: 1,
+    title: "Unsaved work found",
+    message: files.length === 1
+      ? "A project was not closed properly."
+      : `${files.length} projects were not closed properly.`,
+    detail: "Recovering reopens the work as it was. Discarding deletes it.",
+  });
+  files.forEach((file) => {
+    if (choice === 0) {
+      try {
+        const project = JSON.parse(fs.readFileSync(file, "utf-8"));
+        delete project._path;   // recovered work is unsaved: force Save As
+        createEditor(project, { keepLauncher: true });
+      } catch { /* unreadable copy, nothing to recover */ }
+    }
+    try { fs.unlinkSync(file); } catch { /* already gone */ }
+  });
+}
 
 app.on("activate", () => {
   if (!BrowserWindow.getAllWindows().length) createLauncher();
