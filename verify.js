@@ -18,6 +18,11 @@
      node studio/e2e.js --contract 5 does the agent hold its shape
      npx electron studio/pdfcheck.js measure a written pdf
      node studio/mutate.js           break the code, expect red
+
+   The mutation run rewrites the renderer as it works, so nothing else
+   may read it meanwhile. It holds studio/.mutating for the duration and
+   both it and the self-test refuse to start while that file exists,
+   which is a mistake worth making impossible rather than remembering.
 */
 const { execFileSync, spawn } = require("child_process");
 const fs = require("fs");

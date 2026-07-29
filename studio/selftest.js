@@ -27,6 +27,48 @@ const path = require("path");
 const { execFileSync } = require("child_process");
 
 const here = __dirname;
+
+// Signal 0 asks the system whether a process exists without disturbing
+// it, which is how a lock left by a killed run is told from a live one.
+function running(pid) {
+  const id = Number(pid);
+  if (!id) return false;
+  try {
+    process.kill(id, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";   // exists, owned by someone else
+  }
+}
+
+// A mutation run rewrites editor.js as it works. Reading it meanwhile
+// measures the damage rather than the code, which has produced puzzling
+// failures more than once.
+const lock = path.join(here, ".mutating");
+if (fs.existsSync(lock)) {
+  const owner = fs.readFileSync(lock, "utf-8").trim();
+  if (owner !== (process.env.MUTATION_OWNER || "")) {
+    if (running(owner)) {
+      console.error("editor.js is being mutated right now; this would measure "
+        + "the damage rather than the code. Wait for studio/mutate.js to finish.");
+      process.exit(1);
+    }
+    // The owner died without cleaning up, which a killed run does. It
+    // leaves editor.js deliberately broken, so putting the intact copy
+    // back matters more than releasing the lock: measuring the damage
+    // reports failures that have nothing to do with the code.
+    const spare = path.join(here, ".editor.original");
+    if (fs.existsSync(spare)) {
+      fs.writeFileSync(path.join(here, "editor.js"),
+        fs.readFileSync(spare, "utf-8"), "utf-8");
+      fs.unlinkSync(spare);
+      console.error("a killed mutation run had left editor.js broken;"
+        + " the intact copy has been put back");
+    }
+    fs.unlinkSync(lock);
+  }
+}
+
 const html = fs.readFileSync(path.join(here, "editor.html"), "utf-8");
 
 const CHECKS = `

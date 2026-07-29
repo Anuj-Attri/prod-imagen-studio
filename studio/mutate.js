@@ -12,7 +12,57 @@ const path = require("path");
 const { execFileSync } = require("child_process");
 
 const target = path.join(__dirname, "editor.js");
+// While this runs, editor.js on disk is deliberately broken. Anything
+// else reading it would be measuring damage rather than the code, and a
+// concurrent edit would be wiped by the restore. The lock makes that
+// impossible rather than merely documented.
+const lock = path.join(__dirname, ".mutating");
+
+// Signal 0 asks whether a process exists without disturbing it, so a
+// lock left behind by a killed run does not block every later run.
+function running(pid) {
+  const id = Number(pid);
+  if (!id) return false;
+  try {
+    process.kill(id, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";   // exists, owned by someone else
+  }
+}
+
+if (fs.existsSync(lock) && running(fs.readFileSync(lock, "utf-8").trim())) {
+  console.error("a mutation run is already in progress. Wait for it to finish.");
+  process.exit(1);
+}
+
+// A run that is killed outright cannot restore what it broke, and on
+// Windows a forced stop gives no warning to act on. Keeping the intact
+// copy on disk means the damage outlives only until the next run, which
+// puts it back rather than measuring it.
+const spare = path.join(__dirname, ".editor.original");
+if (fs.existsSync(lock) && fs.existsSync(spare)) {
+  fs.writeFileSync(target, fs.readFileSync(spare, "utf-8"), "utf-8");
+  console.log("a previous run was killed before it could undo its damage;"
+    + " editor.js has been put back\n");
+}
+fs.writeFileSync(lock, String(process.pid), "utf-8");
+
 const original = fs.readFileSync(target, "utf-8");
+fs.writeFileSync(spare, original, "utf-8");
+
+// A killed run cannot reach its own cleanup, which is how editor.js was
+// once left mutated on disk. Releasing on the way out covers the ways a
+// process can be stopped from outside.
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+  process.on(signal, () => {
+    try {
+      fs.writeFileSync(target, original, "utf-8");
+      if (fs.existsSync(lock)) fs.unlinkSync(lock);
+    } catch (error) { /* going down anyway */ }
+    process.exit(1);
+  });
+}
 
 // Each mutation names the behaviour it destroys and the check that
 // should therefore fail.
@@ -61,9 +111,9 @@ const MUTATIONS = [
   },
   {
     what: "the pdf is written at a fixed size, not the page's",
-    expect: "the pdf carries every page",
-    from: "      widthPx: PAGE.w, heightPx: PAGE.h, images,",
-    to: "      widthPx: 800, heightPx: 600, images,",
+    expect: "the pdf carries every page at the document's own size",
+    from: "    const widthIn = PAGE.inW || PAGE.w / 96;",
+    to: "    const widthIn = 8.5;",
   },
   {
     what: "the pdf silently drops all but the first page",
@@ -82,10 +132,22 @@ const MUTATIONS = [
 function runSuite() {
   try {
     execFileSync(process.execPath, [path.join(__dirname, "selftest.js")],
-      { encoding: "utf-8", stdio: "pipe" });
+      // This run is the one the lock exists to permit. Naming the owner
+      // lets the suite tell a sanctioned run from a bystander.
+      { encoding: "utf-8", stdio: "pipe",
+        env: { ...process.env, MUTATION_OWNER: String(process.pid) } });
     return null;                       // everything passed
   } catch (error) {
-    return String(error.stdout || "");  // the suite went red
+    const output = String(error.stdout || "");
+    // A red suite says which checks failed. A red suite that says nothing
+    // never ran, and counting that as a caught fault would let a broken
+    // harness report a clean sweep.
+    if (!/checks passed/.test(output)) {
+      throw new Error("the suite did not run: "
+        + (String(error.stderr || "").trim() || "no output")
+          .split(String.fromCharCode(10))[0]);
+    }
+    return output;                      // the suite went red
   }
 }
 
@@ -114,6 +176,9 @@ try {
   }
 } finally {
   fs.writeFileSync(target, original, "utf-8");
+  for (const file of [lock, spare]) {
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+  }
 }
 
 console.log(`\n${MUTATIONS.length - survived}/${MUTATIONS.length} deliberate faults were caught`);

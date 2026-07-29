@@ -26,3 +26,7 @@ studio/__selftest*
 
 # end to end output, regenerated on demand
 e2e-output/
+
+# a mutation run in progress
+studio/.mutating
+studio/.editor.original
