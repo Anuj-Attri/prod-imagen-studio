@@ -284,9 +284,20 @@ ipcMain.handle("export-pdf", async (_e, { suggestedName, widthIn, heightIn, imag
     .sheet img { width: 100%; height: 100%; object-fit: contain; display: block; }
   </style>${body}`;
 
+  // The sheets are full size images, so this document runs to megabytes.
+  // Handed to loadURL as a data url it silently fails to navigate, and
+  // the export then produces an empty or missing file: it worked on a
+  // blank document and stopped working the moment there was art on the
+  // page. Writing the document out and loading the file has no such
+  // limit. The checker had already found this and left a note saying so;
+  // the finding never made it back into the code it was about.
+  const scratch = path.join(app.getPath("temp"),
+    `studio-pdf-${Date.now()}-${process.pid}.html`);
+  await fs.promises.writeFile(scratch, html, "utf-8");
+
   const sheet = new BrowserWindow({ show: false, webPreferences: { offscreen: true } });
   try {
-    await sheet.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
+    await sheet.loadFile(scratch);
     const pdf = await sheet.webContents.printToPDF({
       printBackground: true,
       // inches, not microns: an older signature took microns and the
@@ -295,10 +306,16 @@ ipcMain.handle("export-pdf", async (_e, { suggestedName, widthIn, heightIn, imag
       pageSize: { width: widthIn, height: heightIn },
       margins: { marginType: "none" },
     });
+    if (!pdf || pdf.length < 1000) {
+      // a pdf too small to hold a page means the sheet never rendered;
+      // reporting that beats writing a file that cannot be opened
+      throw new Error("the pages did not render, so nothing was written");
+    }
     await fs.promises.writeFile(result.filePath, pdf);
     return result.filePath;
   } finally {
     sheet.destroy();
+    fs.promises.unlink(scratch).catch(() => {});
   }
 });
 
