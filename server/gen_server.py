@@ -23,6 +23,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -169,19 +170,46 @@ def local_llm_reachable(current: dict) -> bool:
     return _llm_probe["ok"]
 
 
+def local_models(cfg: dict) -> list:
+    try:
+        req = urllib.request.Request(cfg["url"] + "/models")
+        with urllib.request.urlopen(req, timeout=4) as r:
+            data = json.loads(r.read())
+        return [m.get("id") for m in data.get("data", []) if m.get("id")]
+    except Exception:
+        return []
+
+
 def llm_chat(current: dict, system: str, messages: list, max_tokens: int = 900) -> str:
     if local_llm_reachable(current):
         cfg = llm_config(current)
-        result = http_json(
-            cfg["url"] + "/chat/completions",
-            {
-                "model": cfg["model"],
-                "max_tokens": max_tokens,
-                "messages": [{"role": "system", "content": system}] + messages,
-            },
-            {}, timeout=180,
-        )
-        return result["choices"][0]["message"]["content"].strip()
+        available = local_models(cfg)
+        model = cfg["model"]
+        if available and model not in available:
+            model = available[0]
+        try:
+            result = http_json(
+                cfg["url"] + "/chat/completions",
+                {
+                    "model": model,
+                    "max_tokens": max_tokens,
+                    "messages": [{"role": "system", "content": system}] + messages,
+                },
+                {}, timeout=180,
+            )
+            return result["choices"][0]["message"]["content"].strip()
+        except urllib.error.HTTPError as error:
+            detail = ""
+            try:
+                detail = error.read().decode()[:200]
+            except Exception:
+                pass
+            if not available:
+                raise RuntimeError(
+                    "Local endpoint is up but has no models installed. "
+                    "Run: ollama pull qwen3:8b (or set your model in Settings)."
+                )
+            raise RuntimeError(f"Local model call failed ({error.code}): {detail}")
     if current.get("anthropic"):
         result = http_json(
             "https://api.anthropic.com/v1/messages",

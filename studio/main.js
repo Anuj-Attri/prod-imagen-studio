@@ -77,6 +77,12 @@ ipcMain.handle("load-keys", async () => {
 });
 
 app.whenReady().then(() => {
+  if (app.isPackaged) {
+    try {
+      const { autoUpdater } = require("electron-updater");
+      autoUpdater.checkForUpdatesAndNotify();
+    } catch (_) { /* updater unavailable in dev */ }
+  }
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { role: "editMenu" },
     { role: "viewMenu" },
