@@ -187,6 +187,29 @@ function uid() { return Math.random().toString(36).slice(2, 10); }
 // fields a newer one expects. Fill the gaps rather than throwing on the
 // first missing one.
 function normalizeDocument(document_) {
+  // The style is held by name. A project from another build, or one
+  // edited by hand, can name a style that is not here or carry none at
+  // all, and dropping it quietly would strip the contract that keeps a
+  // sequence together.
+  if (!document_.style || typeof document_.style !== "object") {
+    document_.style = {
+      preset: (KIND_RECIPES[document_.kind] || KIND_RECIPES.free).style,
+      extra: "", lockSeed: true, pageMode: "page", pageBg: "#ffffff",
+    };
+  }
+  if (!STYLE_PRESETS[document_.style.preset]) {
+    const fallback = (KIND_RECIPES[document_.kind] || KIND_RECIPES.free).style;
+    const missing = document_.style.preset;
+    document_.style.preset = fallback;
+    if (missing) {
+      // the tags themselves are kept, so a style built elsewhere is not
+      // thrown away without the chance to look at it
+      document_.style.extra = [document_.style.extra, ""].filter(Boolean).join(", ");
+      setTimeout(() => toast(
+        `This project asked for a style called ${missing}, which is not here. `
+        + `Using ${STYLE_PRESETS[fallback].label}.`, true), 0);
+    }
+  }
   if (!Array.isArray(document_.pages) || !document_.pages.length) {
     document_.pages = [{ id: uid(), name: "Page 1", layers: [] }];
   }

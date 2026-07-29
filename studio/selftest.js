@@ -967,6 +967,40 @@ check("a rename onto an existing name is refused", () => {
   return changed === false && doc.cast[0].name === "Rin";
 });
 
+// The style contract is looked up by name. A project written by another
+// build, or edited by hand, can name a style that is not here, and
+// losing it silently would strip the very thing that holds a chapter
+// together.
+check("an unknown style falls back instead of vanishing", () => {
+  currentPage().layers = [];
+  doc.kind = "manga";
+  doc.style.preset = "a-style-that-does-not-exist";
+  normalizeDocument(doc);
+  const panel = addLayer("panel", { x: 0, y: 0, w: 200, h: 150 });
+  panel.props.prompt = "1girl, standing";
+  const composed = composePrompt(panel);
+  if (composed === "1girl, standing") return "the panel was left with no style at all";
+  return STYLE_PRESETS[doc.style.preset] !== undefined
+    ? true : "the document still names a style that is not here";
+});
+
+check("a known style is left exactly as it was", () => {
+  doc.kind = "manga";
+  doc.style.preset = "watercolor";
+  doc.style.extra = "soft edges";
+  normalizeDocument(doc);
+  return doc.style.preset === "watercolor" && doc.style.extra === "soft edges";
+});
+check("a document with no style at all still renders", () => {
+  currentPage().layers = [];
+  delete doc.style;
+  normalizeDocument(doc);
+  renderCanvas();
+  // no style block is not the same as an unknown one, and neither should
+  // stop the document opening
+  return true;
+});
+
 // layout engine
 check("templates yield their panel count", () => {
   for (let n = 1; n <= 8; n += 1) if (pageLayout(n).length !== n) return "n=" + n;
