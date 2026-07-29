@@ -2303,6 +2303,30 @@ function goToPage(index) {
   renderCanvas();
 }
 
+// A page thumbnail is about a hundred pixels wide, but the source is a
+// full render. Handing the browser the original means it decodes the
+// whole bitmap for every page in the document, which a chapter cannot
+// afford, so each one is downscaled once and remembered.
+const thumbCache = new Map();
+function pageThumbnail(dataUrl, onReady) {
+  const cached = thumbCache.get(dataUrl);
+  if (cached) { onReady(cached); return; }
+  const probe = new window.Image();
+  probe.onload = () => {
+    const scale = Math.min(180 / probe.naturalWidth, 240 / probe.naturalHeight, 1);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(probe.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(probe.naturalHeight * scale));
+    canvas.getContext("2d").drawImage(probe, 0, 0, canvas.width, canvas.height);
+    let small;
+    try { small = canvas.toDataURL("image/jpeg", 0.7); } catch { small = dataUrl; }
+    thumbCache.set(dataUrl, small);
+    onReady(small);
+  };
+  probe.onerror = () => onReady(null);
+  probe.src = dataUrl;
+}
+
 function renderPageGrid() {
   const grid = document.getElementById("page-grid");
   if (!grid) return;
@@ -2314,10 +2338,14 @@ function renderPageGrid() {
     const art = page.layers.find((l) => l.props && l.props.image);
     card.innerHTML =
       `<div class="shot">${art
-        ? `<img src="${art.props.image}" alt="">`
+        ? `<img alt="">`
         : `<span style="color:var(--ink-3);font-size:11px">empty</span>`}</div>` +
       `<div class="cap"><span>${index + 1}</span>` +
       `<span class="kill mini" title="Delete page">x</span></div>`;
+    if (art) {
+      const slot = card.querySelector("img");
+      pageThumbnail(art.props.image, (small) => { if (small) slot.src = small; });
+    }
     card.addEventListener("click", (event) => {
       if (event.target.classList.contains("kill")) {
         if (doc.pages.length === 1) { toast("A document needs one page"); return; }

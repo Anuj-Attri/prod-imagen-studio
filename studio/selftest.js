@@ -438,6 +438,23 @@ check("autosave is armed only while work is at risk", () => {
   return armed && asked === 0;           // scheduled, not yet fired
 });
 
+check("page thumbnails are downscaled, not the original", async () => {
+  // a 1200x1600 render, far larger than the hundred pixel slot
+  const canvas = document.createElement("canvas");
+  canvas.width = 1200; canvas.height = 1600;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#4488cc";
+  context.fillRect(0, 0, 1200, 1600);
+  const full = canvas.toDataURL("image/png");
+
+  const small = await new Promise((resolve) => pageThumbnail(full, resolve));
+  if (!small) return "no thumbnail";
+  if (small === full) return "returned the original";
+  // and the second request is served from the cache, not recomputed
+  const again = await new Promise((resolve) => pageThumbnail(full, resolve));
+  return small.length < full.length / 4 && again === small;
+});
+
 // rulers and guides
 check("rulers render page coordinates", () => {
   document.body.classList.add("rulers-on");

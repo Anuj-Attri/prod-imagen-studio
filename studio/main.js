@@ -12,7 +12,7 @@ function recoveryPath(id) { return path.join(recoveryDir, `session-${id}.dimg`);
 function listRecoveries() {
   try {
     return fs.readdirSync(recoveryDir)
-      .filter((name) => name.endsWith(".dimg"))
+      .filter((name) => name.endsWith(".dimg"))   // never a .part
       .map((name) => path.join(recoveryDir, name));
   } catch {
     return [];
@@ -198,12 +198,18 @@ ipcMain.on("unsaved", (event, isDirty) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (win) unsaved.set(win.id, Boolean(isDirty));
 });
-ipcMain.handle("autosave", (event, contents) => {
+ipcMain.handle("autosave", async (event, contents) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return false;
   try {
-    fs.mkdirSync(recoveryDir, { recursive: true });
-    fs.writeFileSync(recoveryPath(win.id), contents, "utf-8");
+    // A chapter is tens of megabytes: writing it synchronously here
+    // would freeze every window for the duration.
+    await fs.promises.mkdir(recoveryDir, { recursive: true });
+    const target = recoveryPath(win.id);
+    await fs.promises.writeFile(target + ".part", contents, "utf-8");
+    // rename last, so a crash mid-write cannot leave a truncated file
+    // where a complete one used to be
+    await fs.promises.rename(target + ".part", target);
     return true;
   } catch {
     return false;   // a failed recovery write must never break editing
@@ -232,7 +238,7 @@ ipcMain.handle("save-project-dialog", async (_e, suggestedName) => {
   return result.canceled ? null : result.filePath;
 });
 ipcMain.handle("write-file", async (_e, filePath, contents) => {
-  fs.writeFileSync(filePath, contents, "utf-8");
+  await fs.promises.writeFile(filePath, contents, "utf-8");
   return true;
 });
 ipcMain.handle("read-file-dialog", async () => {
@@ -249,7 +255,8 @@ ipcMain.handle("export-png-dialog", async (_e, suggestedName, dataUrl) => {
     filters: [{ name: "PNG image", extensions: ["png"] }],
   });
   if (result.canceled) return null;
-  fs.writeFileSync(result.filePath, Buffer.from(dataUrl.replace(/^data:image\/png;base64,/, ""), "base64"));
+  await fs.promises.writeFile(result.filePath,
+    Buffer.from(dataUrl.replace(/^data:image\/png;base64,/, ""), "base64"));
   return result.filePath;
 });
 
@@ -285,7 +292,7 @@ ipcMain.handle("export-pdf", async (_e, { suggestedName, widthPx, heightPx, imag
       pageSize: { width: inches(widthPx) * 25400, height: inches(heightPx) * 25400 },
       margins: { marginType: "none" },
     });
-    fs.writeFileSync(result.filePath, pdf);
+    await fs.promises.writeFile(result.filePath, pdf);
     return result.filePath;
   } finally {
     sheet.destroy();
@@ -297,7 +304,7 @@ ipcMain.handle("choose-folder", async () => {
   return result.canceled || !result.filePaths.length ? null : result.filePaths[0];
 });
 ipcMain.handle("write-png", async (_e, filePath, dataUrl) => {
-  fs.writeFileSync(filePath,
+  await fs.promises.writeFile(filePath,
     Buffer.from(dataUrl.replace(/^data:image\/png;base64,/, ""), "base64"));
   return true;
 });
