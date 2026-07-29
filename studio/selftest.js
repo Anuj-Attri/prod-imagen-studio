@@ -319,6 +319,57 @@ check("zoom to selection frames it", () => {
   return zoom !== before && screenX > -1 && screenX < stage.width();
 });
 
+// saving and reopening must not silently drop project state
+check("project round trip preserves everything", () => {
+  while (doc.pages.length > 1) doc.pages.pop();
+  goToPage(0);
+  currentPage().layers = [];
+  doc.name = "Round trip";
+  doc.cast = [{ id: "c1", name: "Rin", tags: "1girl, long black hair" }];
+  doc.style = { preset: "noir", extra: "rain", lockSeed: true,
+                pageMode: "panels", pageBg: "#101014", seedBase: 4242 };
+  doc.guides = { v: [120, 400], h: [88] };
+  doc.story = { chapter: "A duel begins", overall: "Two rivals", flags: [] };
+  const a = addLayer("rect", { x: 10, y: 10, w: 50, h: 50 });
+  const b = addLayer("rect", { x: 70, y: 10, w: 50, h: 50 });
+  selectedIds = [a.id, b.id];
+  groupSelected();
+  select(a.id);
+  flipSelected("x");
+  const panel = addLayer("panel", { x: 0, y: 200, w: 300, h: 200 });
+  panel.props.cast = ["Rin"];
+  panel.props.prompt = "standing, rooftop";
+
+  // exactly what the save handler writes, and what a reopen parses
+  const saved = JSON.stringify({ name: doc.name, document: doc });
+  const reopened = JSON.parse(saved).document;
+
+  if (reopened.cast.length !== 1 || reopened.cast[0].tags !== doc.cast[0].tags) return "cast";
+  if (reopened.style.preset !== "noir" || reopened.style.pageBg !== "#101014") return "style";
+  if (reopened.style.seedBase !== 4242) return "seed base";
+  if (reopened.guides.v.length !== 2 || reopened.guides.h[0] !== 88) return "guides";
+  if (reopened.story.chapter !== "A duel begins") return "story";
+  const layers = reopened.pages[0].layers;
+  const grouped = layers.filter((l) => l.group);
+  if (grouped.length !== 2 || grouped[0].group !== grouped[1].group) return "group";
+  if (!layers.some((l) => l.props.flipX)) return "flip";
+  const panelBack = layers.find((l) => l.type === "panel");
+  return panelBack.props.cast[0] === "Rin" && panelBack.props.prompt === "standing, rooftop";
+});
+check("reopened project rehydrates missing newer fields", () => {
+  // a file written by an older build has none of these keys
+  const old = { version: 1, name: "Old", kind: "manga",
+                pages: [{ id: "p", name: "Page 1", layers: [] }] };
+  const hydrated = JSON.parse(JSON.stringify(old));
+  hydrated.chat = hydrated.chat || [];
+  hydrated.style = hydrated.style || { preset: "manga", extra: "", lockSeed: true,
+                                       pageMode: "page", pageBg: "#ffffff" };
+  hydrated.cast = hydrated.cast || [];
+  hydrated.guides = hydrated.guides || { v: [], h: [] };
+  return hydrated.style.preset === "manga" && hydrated.cast.length === 0
+    && hydrated.guides.v.length === 0;
+});
+
 // rulers and guides
 check("rulers render page coordinates", () => {
   document.body.classList.add("rulers-on");
@@ -332,6 +383,7 @@ check("ruler step grows as you zoom out", () => {
   return far > near;
 });
 check("guides draw and clear", () => {
+  doc.guides = { v: [], h: [] };   // self-contained, not inherited state
   doc.guides.v.push(300);
   doc.guides.h.push(120);
   drawGuides();

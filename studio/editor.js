@@ -3257,6 +3257,8 @@ async function sendChat(overrideText, quiet) {
         messages: doc.chat.slice(-16), project: doc.name, kind: doc.kind,
         art_style: (STYLE_PRESETS[doc.style.preset] || {}).label,
         layout: recipe().layout, cast: doc.cast, pages,
+        // the established chapter, so a continuing page follows it
+        story: doc.story && doc.story.chapter ? doc.story : undefined,
       }),
     });
     const result = await response.json();

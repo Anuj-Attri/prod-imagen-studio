@@ -464,6 +464,9 @@ AGENT_SYSTEM = (
     "the image; the words go in the dialogue list, which the app draws "
     "as real text. dialogue kind is balloon, caption or sfx; speaker is "
     "left or right. sfx is one or two loud words. "
+    "If the context carries a story_so_far, this work already has a "
+    "narrative: continue it rather than restarting, keep established "
+    "facts intact, and do not contradict anything already on the pages. "
     "When the user describes a scene, page or story beat, return 2 to 6 "
     "panels that stage it with strong pacing. Only when they ask a "
     "plain factual question, return \"panels\": [] and answer in the "
@@ -573,6 +576,7 @@ def agent_chat(payload: dict, current: dict) -> dict:
         "kind": payload.get("kind"),
         "art_style": payload.get("art_style"),
         "existing_cast": payload.get("cast", []),
+        "story_so_far": payload.get("story"),
         "pages": payload.get("pages", []),
     })
     messages = [
