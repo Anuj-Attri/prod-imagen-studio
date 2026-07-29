@@ -539,6 +539,27 @@ function setZoom(next, pivot) {
   world.position({ x: anchor.x - worldPos.x * zoom, y: anchor.y - worldPos.y * zoom });
   applyView();
 }
+function zoomToSelection() {
+  const layers = selectedLayers();
+  if (!layers.length) { fitPage(); return; }
+  const rects = layers.map(layerRect);
+  const x1 = Math.min(...rects.map((r) => r.x));
+  const y1 = Math.min(...rects.map((r) => r.y));
+  const x2 = Math.max(...rects.map((r) => r.x + r.width));
+  const y2 = Math.max(...rects.map((r) => r.y + r.height));
+  const margin = 60;
+  zoom = Math.min(
+    (stage.width() - margin * 2) / Math.max(x2 - x1, 1),
+    (stage.height() - margin * 2) / Math.max(y2 - y1, 1),
+    3,
+  );
+  world.position({
+    x: (stage.width() - (x2 - x1) * zoom) / 2 - x1 * zoom,
+    y: (stage.height() - (y2 - y1) * zoom) / 2 - y1 * zoom,
+  });
+  applyView();
+}
+
 function fitPage() {
   const margin = 56;
   zoom = Math.min(
@@ -774,8 +795,20 @@ function buildNode(layer) {
   }
 
   let dragSiblings = null; // id -> start position, for group drags
-  node.on("dragstart", () => {
+  node.on("dragstart", (event) => {
     if (!selectedIds.includes(layer.id)) select(layer.id);
+    // holding alt drops a copy at the original position and drags on
+    if (event.evt && event.evt.altKey && !node._duplicated) {
+      node._duplicated = true;
+      const stamp = selectedLayers().map((l) => JSON.parse(JSON.stringify(l)));
+      stamp.forEach((copy) => {
+        copy.id = uid();
+        layerSeq += 1;
+        copy.name = copy.name.replace(/\d+$/, "") + layerSeq;
+        currentPage().layers.push(copy);
+      });
+      renderLayerList();
+    }
     dragSiblings = {};
     selectedIds.forEach((id) => {
       const other = nodes.get(id);
@@ -800,6 +833,7 @@ function buildNode(layer) {
   node.on("dragend", () => {
     guides.destroyChildren();
     dragSiblings = null;
+    node._duplicated = false;
     selectedIds.forEach((id) => {
       const other = nodes.get(id);
       const model = findLayer(id);
@@ -1204,13 +1238,14 @@ function deleteSelected() {
 function copySelected() {
   clipboard = selectedLayers().map((l) => JSON.parse(JSON.stringify(l)));
 }
-function pasteClipboard() {
+function pasteClipboard(inPlace) {
   if (!clipboard.length) return;
+  const offset = inPlace ? 0 : 16;
   const fresh = clipboard.map((l) => {
     const copy = JSON.parse(JSON.stringify(l));
     copy.id = uid();
-    copy.x += 16;
-    copy.y += 16;
+    copy.x += offset;
+    copy.y += offset;
     layerSeq += 1;
     copy.name = copy.name.replace(/\d+$/, "") + layerSeq;
     return copy;
@@ -2144,7 +2179,11 @@ document.addEventListener("keydown", (event) => {
     }
     if (key === "c") { event.preventDefault(); copySelected(); return; }
     if (key === "x") { event.preventDefault(); copySelected(); deleteSelected(); return; }
-    if (key === "v") { event.preventDefault(); pasteClipboard(); return; }
+    if (key === "v") {
+      event.preventDefault();
+      pasteClipboard(event.shiftKey);  // shift pastes in place
+      return;
+    }
     if (key === "d") { event.preventDefault(); duplicateSelected(); return; }
     if (key === "a") {
       event.preventDefault();
@@ -3314,6 +3353,8 @@ const MENU_ACTIONS = {
   "zoom-in": () => setZoom(zoom * 1.2),
   "zoom-out": () => setZoom(zoom / 1.2),
   "zoom-fit": fitPage,
+  "zoom-selection": zoomToSelection,
+  "paste-in-place": () => pasteClipboard(true),
   theme: () => document.getElementById("theme-toggle").click(),
   rulers: toggleRulers,
   "clear-guides": clearGuides,
@@ -3343,6 +3384,7 @@ const MENUS = [
     ["Redo", "redo", "Ctrl+Y"],
     ["-"],
     ["Duplicate", "duplicate", "Ctrl+D"],
+    ["Paste in Place", "paste-in-place", "Ctrl+Shift+V"],
     ["Select All", "select-all", "Ctrl+A"],
     ["Delete", "delete", "Del"],
     ["-"],
@@ -3356,6 +3398,7 @@ const MENUS = [
     ["Zoom In", "zoom-in", "Ctrl+="],
     ["Zoom Out", "zoom-out", "Ctrl+-"],
     ["Fit Page", "zoom-fit", "Ctrl+0"],
+    ["Zoom to Selection", "zoom-selection", "Ctrl+2"],
     ["-"],
     ["Toggle Light / Dark", "theme"],
     ["-"],
