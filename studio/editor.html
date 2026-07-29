@@ -202,6 +202,31 @@
       pointer-events: none; z-index: 90; box-shadow: var(--page-bloom);
     }
     #toast.show { opacity: 1; }
+    /* ===== contextual tool options bar ===== */
+    #tool-options {
+      position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+      pointer-events: auto; display: none; align-items: center; gap: 7px;
+      background: var(--surface); border: 1px solid var(--hairline); border-radius: 9px;
+      padding: 5px 9px; z-index: 20; box-shadow: var(--page-bloom);
+    }
+    #tool-options.show { display: flex; }
+    #tool-options label { color: var(--ink-3); font-size: 11px; white-space: nowrap; }
+    #tool-options input[type="color"] {
+      width: 26px; height: 22px; padding: 0; border: 1px solid var(--hairline);
+      border-radius: 5px; background: none; cursor: pointer;
+    }
+    #tool-options input[type="range"] { width: 80px; accent-color: var(--accent); }
+    #tool-options .divider { height: 16px; }
+    .opt-btn {
+      width: 26px; height: 24px; padding: 0; display: grid; place-items: center;
+      background: transparent; border: 1px solid transparent; color: var(--ink-2); border-radius: 6px;
+    }
+    .opt-btn:hover { background: var(--surface-2); color: var(--ink); }
+    .opt-btn:disabled { opacity: 0.3; pointer-events: none; }
+    .opt-btn svg { width: 15px; height: 15px; }
+    .prop-grid input[type="color"] { padding: 1px 2px; height: 26px; }
+    .prop-grid input[type="range"] { padding: 0; accent-color: var(--accent); }
+    .prop-grid input[type="checkbox"] { width: auto; justify-self: start; }
   </style>
 </head>
 <body>
@@ -222,6 +247,8 @@
     </div>
     <span class="divider"></span>
     <div class="tb-group">
+      <button id="undo" class="icon quiet" title="Undo (Ctrl+Z)">↶</button>
+      <button id="redo" class="icon quiet" title="Redo (Ctrl+Y)">↷</button>
       <button id="save" class="quiet">Save</button>
       <button id="export" class="quiet">Export</button>
       <button id="theme-toggle" class="icon quiet" title="Light / dark">◐</button>
@@ -238,11 +265,12 @@
 
   <div id="canvas-wrap"></div>
   <div id="canvas-overlay">
+    <div id="tool-options"></div>
     <div id="empty-hint">
       <h3>Blank page</h3>
       <p>
-        Press <kbd>P</kbd> and drag to frame an AI panel &nbsp;·&nbsp; <kbd>B</kbd> balloon &nbsp;·&nbsp; <kbd>S</kbd> sfx<br />
-        <kbd>C</kbd> caption &nbsp;·&nbsp; <kbd>T</kbd> title &nbsp;·&nbsp; <kbd>Ctrl</kbd>+scroll zoom
+        <kbd>P</kbd> drag an AI panel &nbsp;·&nbsp; <kbd>D</kbd> draw &nbsp;·&nbsp; <kbd>M</kbd> place image &nbsp;·&nbsp; drop files anywhere<br />
+        <kbd>B</kbd> balloon &nbsp;·&nbsp; <kbd>T</kbd> title &nbsp;·&nbsp; <kbd>Ctrl</kbd>+Z undo &nbsp;·&nbsp; <kbd>Ctrl</kbd>+scroll zoom
       </p>
     </div>
     <div id="zoom-controls">
@@ -297,22 +325,28 @@
     <span class="eng" id="eng-api"><span class="dot"></span>hosted APIs</span>
     <span class="eng" id="eng-story"><span class="dot"></span>agent + story</span>
     <span style="flex:1"></span>
-    <span id="hint">V select · P panel · B balloon · C caption · T text · S sfx · R shape · Del delete</span>
+    <span id="hint">V select · D draw · E erase · P panel · M image · B balloon · T text · R O L A W shapes · I pick color · Ctrl+Z undo · Del delete</span>
   </div>
+  <input type="file" id="image-file" accept="image/*" multiple style="display:none">
 
   <div id="settings-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:70; place-items:center;">
-    <div style="width:420px; background:var(--surface); border:1px solid var(--hairline-strong); border-radius:12px; padding:20px;">
-      <h3 style="font-size:14px; margin-bottom:4px;">Settings</h3>
-      <p style="color:var(--ink-3); font-size:11.5px; margin-bottom:14px;">Keys are stored locally in server/keys.json and never leave your machine except to call the provider you configured.</p>
+    <div style="width:380px; background:var(--surface); border:1px solid var(--hairline-strong); border-radius:12px; padding:20px;">
+      <h3 style="font-size:14px; margin-bottom:12px;">Settings</h3>
       <div class="prop-grid">
-        <label>Anthropic</label><input id="key-anthropic" placeholder="sk-ant-... (agent + story)">
-        <label>Ideogram</label><input id="key-ideogram" placeholder="optional">
-        <label>OpenAI</label><input id="key-openai" placeholder="optional">
-        <label>BFL / FLUX</label><input id="key-bfl" placeholder="optional">
-        <label>Local LLM</label><input id="key-llm-url" placeholder="http://127.0.0.1:11434/v1 (Ollama or vLLM)">
-        <label>LLM model</label><input id="key-llm-model" placeholder="qwen3:8b">
+        <label>Ideogram</label><input id="key-ideogram" placeholder="API key">
+        <label>OpenAI</label><input id="key-openai" placeholder="API key">
+        <label>BFL / FLUX</label><input id="key-bfl" placeholder="API key">
       </div>
-      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:16px;">
+      <details style="margin-top:12px;">
+        <summary style="color:var(--ink-3); font-size:11.5px; cursor:pointer;">Advanced</summary>
+        <div class="prop-grid" style="margin-top:10px;">
+          <label>Local LLM</label><input id="key-llm-url" placeholder="auto">
+          <label>Model</label><input id="key-llm-model" placeholder="auto">
+          <label>Anthropic</label><input id="key-anthropic" placeholder="optional">
+        </div>
+      </details>
+      <p style="color:var(--ink-3); font-size:11px; margin-top:12px;">Everything runs on this machine. Keys are only needed for hosted image engines.</p>
+      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:14px;">
         <button id="settings-cancel">Cancel</button>
         <button id="settings-save" class="primary">Save</button>
       </div>
