@@ -289,7 +289,10 @@ ipcMain.handle("export-pdf", async (_e, { suggestedName, widthIn, heightIn, imag
     await sheet.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
     const pdf = await sheet.webContents.printToPDF({
       printBackground: true,
-      pageSize: { width: widthIn * 25400, height: heightIn * 25400 },
+      // inches, not microns: an older signature took microns and the
+      // conversion survived, which produced sheets thousands of inches
+      // across. Measured with studio/pdfcheck.js.
+      pageSize: { width: widthIn, height: heightIn },
       margins: { marginType: "none" },
     });
     await fs.promises.writeFile(result.filePath, pdf);

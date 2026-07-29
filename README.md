@@ -173,6 +173,7 @@ runs anywhere. Two more need hardware:
     node studio/e2e.js               produce one of each document type
     node studio/e2e.js --contract 5  does the agent hold its shape
     node studio/mutate.js            break the code, expect the tests to notice
+    npx electron studio/pdfcheck.js  measure a written pdf's page size
 
 ## Security
 
