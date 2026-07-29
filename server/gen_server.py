@@ -166,14 +166,26 @@ def generate_gpu(prompt: str, seed: int, width: int, height: int,
     full_negative = ", ".join(p for p in (negative.strip(" ,"), GPU_NEGATIVE) if p)
     with _gpu_run_lock:  # one generation at a time: the pipeline is stateful
         generator = torch.Generator("cuda").manual_seed(seed)
-        image = pipe(
-            prompt=prompt,
-            negative_prompt=full_negative,
-            width=snap64(width), height=snap64(height),
-            num_inference_steps=int(os.environ.get("LOCAL_IMAGE_STEPS", "28")),
-            guidance_scale=float(os.environ.get("LOCAL_IMAGE_CFG", "5.0")),
-            generator=generator,
-        ).images[0]
+        try:
+            image = pipe(
+                prompt=prompt,
+                negative_prompt=full_negative,
+                width=snap64(width), height=snap64(height),
+                num_inference_steps=int(os.environ.get("LOCAL_IMAGE_STEPS", "28")),
+                guidance_scale=float(os.environ.get("LOCAL_IMAGE_CFG", "5.0")),
+                generator=generator,
+            ).images[0]
+        except torch.cuda.OutOfMemoryError:
+            # a half finished run leaves the allocator fragmented, and
+            # every later request would fail too unless it is released
+            torch.cuda.empty_cache()
+            free, total = torch.cuda.mem_get_info()
+            raise RuntimeError(
+                "The GPU ran out of memory at "
+                f"{snap64(width)}x{snap64(height)}. "
+                f"{free // (1024 ** 2)} MB free of {total // (1024 ** 2)} MB. "
+                "Close other GPU applications, or use a smaller panel."
+            ) from None
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     return buffer.getvalue()
