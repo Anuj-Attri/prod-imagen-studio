@@ -9,10 +9,12 @@ for /f "tokens=5" %%p in ('netstat -ano ^| findstr /r /c:"TCP.*:8787 .*LISTENING
 )
 
 rem Prefer the CUDA interpreter so the local GPU engine is available.
-set STUDIO_PY=python
-if exist "%~dp0.venv-image\Scripts\python.exe" set STUDIO_PY="%~dp0.venv-image\Scripts\python.exe"
+set "STUDIO_PY=python"
+if exist "%~dp0.venv-image\Scripts\python.exe" set "STUDIO_PY=%~dp0.venv-image\Scripts\python.exe"
 
-start "prod-imagen server" /min cmd /c "%STUDIO_PY% -m server.gen_server"
+echo Starting generation server...
+start "prod-imagen server" /min "%STUDIO_PY%" -m server.gen_server
+
 cd studio
 if not exist node_modules call npm install --no-audit --no-fund
 npm start
