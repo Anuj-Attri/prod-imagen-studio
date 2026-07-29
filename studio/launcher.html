@@ -5,152 +5,131 @@
   <title>prod-imagen studio</title>
   <style>
     :root {
-      --bg: #0b0a0e; --surface: #121016; --surface-2: #17151c; --edge: rgba(255,255,255,0.08);
-      --ink: #e9e7ee; --ink-2: rgba(233,231,238,0.62); --ink-3: rgba(233,231,238,0.42); --accent: #5a4ca8;
+      --bg: #0b0a0e; --surface: #121016; --surface-2: #17151c;
+      --hairline: rgba(255,255,255,0.07); --hairline-strong: rgba(255,255,255,0.14);
+      --ink: #e9e7ee; --ink-2: rgba(233,231,238,0.60); --ink-3: rgba(233,231,238,0.38);
+      --accent: #5a4ca8;
     }
     * { box-sizing: border-box; margin: 0; user-select: none; }
     body {
       background: var(--bg); color: var(--ink); height: 100vh;
       font: 13px/1.5 "Segoe UI", system-ui, sans-serif;
-      display: flex; flex-direction: column; padding: 44px 56px 36px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
     }
-    h1 { font-size: 21px; font-weight: 650; letter-spacing: -0.01em; }
-    .sub { color: var(--ink-2); margin-top: 4px; font-size: 13px; }
-    .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 34px; }
-    .mode {
-      background: var(--surface); border: 1px solid var(--edge); border-radius: 10px;
-      padding: 22px 22px 18px; cursor: pointer; transition: border-color 120ms, transform 120ms;
+    .drag-strip { position: fixed; top: 0; left: 0; right: 92px; height: 40px; -webkit-app-region: drag; }
+    #win-close {
+      position: fixed; top: 6px; right: 8px; width: 38px; height: 30px;
+      background: transparent; border: none; color: var(--ink-3); border-radius: 6px; cursor: pointer;
     }
-    .mode:hover { border-color: var(--accent); transform: translateY(-1px); }
-    .mode .glyph { font-size: 26px; }
-    .mode h2 { font-size: 15px; margin: 12px 0 4px; }
-    .mode p { color: var(--ink-2); font-size: 12.5px; line-height: 1.55; }
-    .mode .kinds { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 6px; }
+    #win-close:hover { background: #b3352c; color: #fff; }
+    .wordmark { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+    .wordmark svg { width: 24px; height: 24px; color: var(--ink); }
+    .wordmark b { font-size: 19px; font-weight: 650; letter-spacing: -0.01em; }
+    .sub { color: var(--ink-3); font-size: 12px; margin-bottom: 34px; }
+    .sub a { color: var(--accent); text-decoration: none; }
+    .tiles { display: grid; grid-template-columns: 220px 220px; gap: 12px; }
+    .tile {
+      background: var(--surface); border: 1px solid var(--hairline); border-radius: 9px;
+      padding: 14px 16px; cursor: pointer; transition: border-color 120ms;
+    }
+    .tile:hover { border-color: var(--hairline-strong); }
+    .tile.sel { border-color: var(--accent); }
+    .tile svg { width: 16px; height: 16px; color: var(--ink-2); margin-bottom: 9px; }
+    .tile h2 { font-size: 13px; font-weight: 600; }
+    .tile p { color: var(--ink-3); font-size: 11.5px; margin-top: 2px; }
+    .tile .tag { float: right; font-size: 9.5px; letter-spacing: 0.06em; color: var(--ink-3); border: 1px solid var(--hairline); border-radius: 4px; padding: 1px 6px; }
+    .kinds { display: flex; gap: 6px; margin: 16px 0 22px; }
     .kind {
-      font-size: 11px; color: var(--ink-2); border: 1px solid var(--edge);
-      border-radius: 99px; padding: 3px 10px; cursor: pointer;
+      font-size: 11px; color: var(--ink-2); border: 1px solid var(--hairline);
+      border-radius: 99px; padding: 3px 11px; cursor: pointer;
     }
-    .kind:hover, .kind.sel { color: var(--ink); border-color: var(--accent); background: rgba(90,76,168,0.18); }
-    .mode.video { position: relative; }
-    .mode.video .badge {
-      position: absolute; top: 16px; right: 16px; font-size: 10px; letter-spacing: 0.05em;
-      color: var(--ink-3); border: 1px solid var(--edge); border-radius: 4px; padding: 2px 7px;
-    }
-    .row { display: flex; gap: 12px; align-items: center; margin-top: 26px; }
+    .kind:hover { color: var(--ink); border-color: var(--hairline-strong); }
+    .kind.sel { color: var(--ink); border-color: var(--accent); }
+    .row { display: flex; gap: 8px; width: 452px; }
     input[type="text"] {
-      flex: 1; background: var(--surface); border: 1px solid var(--edge); border-radius: 7px;
-      color: var(--ink); padding: 9px 12px; font: inherit; user-select: text;
+      flex: 1; background: var(--surface); border: 1px solid var(--hairline); border-radius: 7px;
+      color: var(--ink); padding: 8px 12px; font: inherit; user-select: text;
     }
     input[type="text"]:focus { outline: none; border-color: var(--accent); }
     button {
-      background: var(--accent); color: #fff; border: none; border-radius: 7px;
-      padding: 9px 22px; font: inherit; font-weight: 600; cursor: pointer;
+      background: var(--surface-2); color: var(--ink); border: 1px solid var(--hairline);
+      border-radius: 7px; padding: 8px 16px; font: inherit; cursor: pointer;
     }
-    button:disabled { opacity: 0.4; cursor: default; }
-    button.ghost { background: transparent; color: var(--ink-2); border: 1px solid var(--edge); font-weight: 500; }
-    button.ghost:hover { color: var(--ink); border-color: var(--ink-3); }
-    footer { margin-top: auto; display: flex; align-items: center; gap: 10px; color: var(--ink-3); font-size: 11.5px; }
+    button:hover { border-color: var(--hairline-strong); }
+    button.primary { border-color: var(--accent); }
+    footer { position: fixed; bottom: 14px; color: var(--ink-3); font-size: 11px; }
   </style>
 </head>
 <body>
   <div class="drag-strip"></div>
   <button id="win-close" title="Close">✕</button>
-  <style>
-    .drag-strip { position: fixed; top: 0; left: 0; right: 92px; height: 40px; -webkit-app-region: drag; }
-    #win-close {
-      position: fixed; top: 6px; right: 8px; width: 38px; height: 30px;
-      background: transparent; border: none; color: var(--ink-3); border-radius: 6px;
-    }
-    #win-close:hover { background: #b3352c; color: #fff; }
-  </style>
-  <h1>New project</h1>
-  <div class="sub">Choose a project mode. Simple to start, as deep as you need it to get.</div>
 
-  <div class="modes">
-    <div class="mode" id="mode-image" data-mode="image">
-      <div class="glyph">🖼️</div>
-      <h2>Image</h2>
-      <p>Pages, panels, posters, diagrams, covers: a layered canvas where every element stays editable and all lettering is exact vector text.</p>
-      <div class="kinds" id="image-kinds">
-        <span class="kind sel" data-kind="manga">Manga page</span>
-        <span class="kind" data-kind="anime">Anime illustration</span>
-        <span class="kind" data-kind="poster">Poster / cover</span>
-        <span class="kind" data-kind="diagram">Diagram / graph</span>
-        <span class="kind" data-kind="free">Freeform</span>
-      </div>
+  <div class="wordmark">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 15l5-5 4 4 3-3 6 6" stroke-linejoin="round"/></svg>
+    <b>prod-imagen</b>
+  </div>
+  <div class="sub">studio</div>
+
+  <div class="tiles">
+    <div class="tile sel" id="tile-image" data-mode="image">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3.5" y="3.5" width="17" height="17" rx="1.5"/><path d="M3.5 15l5-5 4 4 2.5-2.5 5.5 5.5"/></svg>
+      <h2>Image project</h2>
+      <p>Pages, panels, posters, diagrams</p>
     </div>
-    <div class="mode video" id="mode-video" data-mode="video">
-      <span class="badge">PHASE 2</span>
-      <div class="glyph">🎞️</div>
-      <h2>Video</h2>
-      <p>Any style: anime, 3D, realistic, watercolor. Built as deterministic image sequences routed through the frame encoder; unlocks when the image engine is fast enough.</p>
-      <div class="kinds">
-        <span class="kind" data-kind="anime-video">Anime</span>
-        <span class="kind" data-kind="realistic">Realistic</span>
-        <span class="kind" data-kind="watercolor">Watercolor</span>
-        <span class="kind" data-kind="3d">3D</span>
-      </div>
+    <div class="tile" id="tile-video" data-mode="video">
+      <span class="tag">PHASE 2</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3.5" y="5" width="17" height="14" rx="1.5"/><path d="M10 9.5l5 2.5-5 2.5v-5z" stroke-linejoin="round"/></svg>
+      <h2>Video project</h2>
+      <p>Deterministic frame sequences</p>
     </div>
+  </div>
+
+  <div class="kinds" id="kinds">
+    <span class="kind sel" data-kind="manga">Manga</span>
+    <span class="kind" data-kind="anime">Illustration</span>
+    <span class="kind" data-kind="poster">Poster</span>
+    <span class="kind" data-kind="diagram">Diagram</span>
+    <span class="kind" data-kind="free">Freeform</span>
   </div>
 
   <div class="row">
     <input type="text" id="project-name" placeholder="Project name" value="Untitled manga" />
-    <button id="create">Create project</button>
-    <button id="open-existing" class="ghost">Open existing…</button>
+    <button id="create" class="primary">Create</button>
+    <button id="open-existing">Open</button>
   </div>
 
-  <footer>
-    <span>prod-imagen studio 0.2</span><span>·</span>
-    <span>engines: local draft · prod-imagen pod · hosted APIs (keys in Settings)</span>
-  </footer>
+  <footer>prod-imagen studio 0.4</footer>
 
   <script>
     let mode = "image";
     let kind = "manga";
-    const imageCard = document.getElementById("mode-image");
-    const videoCard = document.getElementById("mode-video");
+    document.getElementById("win-close").onclick = () => window.studio.win("close");
 
+    document.querySelectorAll(".tile").forEach((tile) => {
+      tile.addEventListener("click", () => {
+        document.querySelectorAll(".tile").forEach((t) => t.classList.remove("sel"));
+        tile.classList.add("sel");
+        mode = tile.dataset.mode;
+      });
+    });
     document.querySelectorAll(".kind").forEach((chip) => {
-      chip.addEventListener("click", (event) => {
-        event.stopPropagation();
-        const card = chip.closest(".mode");
-        mode = card.dataset.mode;
-        card.querySelectorAll(".kind").forEach((c) => c.classList.remove("sel"));
+      chip.addEventListener("click", () => {
+        document.querySelectorAll(".kind").forEach((c) => c.classList.remove("sel"));
         chip.classList.add("sel");
         kind = chip.dataset.kind;
-        syncName();
+        const names = { manga: "Untitled manga", anime: "Untitled illustration", poster: "Untitled poster", diagram: "Untitled diagram", free: "Untitled canvas" };
+        const input = document.getElementById("project-name");
+        if (input.value.startsWith("Untitled")) input.value = names[kind];
       });
     });
-    [imageCard, videoCard].forEach((card) => {
-      card.addEventListener("click", () => {
-        mode = card.dataset.mode;
-        syncName();
-      });
-    });
-
-    function syncName() {
-      const names = {
-        manga: "Untitled manga", anime: "Untitled illustration", poster: "Untitled poster",
-        diagram: "Untitled diagram", free: "Untitled canvas",
-        "anime-video": "Untitled anime video", realistic: "Untitled video",
-        watercolor: "Untitled video", "3d": "Untitled video",
-      };
-      const input = document.getElementById("project-name");
-      if (input.value.startsWith("Untitled")) input.value = names[kind] || "Untitled project";
-    }
 
     document.getElementById("create").addEventListener("click", () => {
-      if (mode === "video") {
-        alert("Video projects unlock in phase 2. The deterministic frame pipeline needs a fast-enough image engine first. Start with an Image project.");
-        return;
-      }
+      if (mode === "video") return alert("Video projects arrive in phase 2. Start with an Image project.");
       window.studio.openProject({
         name: document.getElementById("project-name").value.trim() || "Untitled",
-        mode, kind,
-        created: new Date().toISOString(),
+        mode, kind, created: new Date().toISOString(),
       });
     });
-
     document.getElementById("open-existing").addEventListener("click", async () => {
       const file = await window.studio.readFileDialog();
       if (!file) return;
@@ -158,7 +137,6 @@
       project._path = file.path;
       window.studio.openProject(project);
     });
-    document.getElementById("win-close").onclick = () => window.studio.win("close");
   </script>
 </body>
 </html>

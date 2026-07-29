@@ -187,7 +187,7 @@ def analyze_story(payload: dict, api_key: str) -> dict:
 
 
 AGENT_SYSTEM = (
-    "You are Yoru, the in-app copilot of prod-imagen studio, a canvas tool "
+    "You are the built-in agent of prod-imagen studio, a canvas tool "
     "for manga, anime, and illustration projects. You receive the user's "
     "pages (panel prompts and dialogue) as context. Help with: panel prompt "
     "writing, dialogue and lettering, page composition and pacing, story "
@@ -331,7 +331,7 @@ class Handler(BaseHTTPRequestHandler):
     def _chat(self, payload: dict) -> None:
         current = keys()
         if not current["anthropic"]:
-            self._json(500, {"error": "Yoru needs an Anthropic key"})
+            self._json(500, {"error": "Agent needs an Anthropic key"})
             return
         try:
             self._json(200, {"ok": True, "reply": agent_chat(payload, current["anthropic"])})

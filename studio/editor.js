@@ -385,8 +385,8 @@ function renderLayerList() {
     row.innerHTML =
       `<span class="glyph">${ICONS[layer.type] || ""}</span>` +
       `<span class="name">${escapeHtml(layer.name)}</span>` +
-      `<span class="mini vis ${layer.visible ? "" : "engaged"}" title="show / hide">${layer.visible ? "👁" : "–"}</span>` +
-      `<span class="mini lock ${layer.locked ? "engaged" : ""}" title="lock">${layer.locked ? "🔒" : "○"}</span>`;
+      `<span class="mini vis ${layer.visible ? "" : "engaged"}" title="show or hide">${layer.visible ? "●" : "○"}</span>` +
+      `<span class="mini lock ${layer.locked ? "engaged" : ""}" title="lock">${layer.locked ? "L" : "U"}</span>`;
     row.addEventListener("click", (event) => {
       if (event.target.classList.contains("vis")) { layer.visible = !layer.visible; renderCanvas(); return; }
       if (event.target.classList.contains("lock")) { layer.locked = !layer.locked; renderCanvas(); return; }
@@ -790,7 +790,7 @@ async function sendChat() {
     thinking.textContent = result.reply;
     chatHistory.push({ role: "assistant", content: result.reply });
   } catch (error) {
-    thinking.textContent = "Yoru is offline: " + error.message;
+    thinking.textContent = "Agent offline: " + error.message;
   }
 }
 function appendMsg(kind, text) {
