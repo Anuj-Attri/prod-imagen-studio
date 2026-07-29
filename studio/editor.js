@@ -60,35 +60,63 @@ function primaryLayer() { return selectedIds.length === 1 ? findLayer(selectedId
 function selectedLayers() { return selectedIds.map(findLayer).filter(Boolean); }
 
 // -------------------------------------------------------------- history --
+// One stack serves both undo/redo and the visible version list. Entries
+// with a label are checkpoints (milestones the user can jump back to);
+// unlabelled ones are ordinary edit steps.
 let history = [];
 let historyIndex = -1;
 function snapshotDoc() {
   return JSON.stringify(doc, (key, value) => (key === "chat" ? undefined : value));
 }
-function commit() {
+function commit(label) {
   const snap = snapshotDoc();
-  if (history[historyIndex] === snap) return; // no-op change
+  if (history[historyIndex] && history[historyIndex].json === snap) {
+    if (label) { history[historyIndex].label = label; renderHistory(); }
+    return;
+  }
   history = history.slice(0, historyIndex + 1);
-  history.push(snap);
-  if (history.length > 80) history.shift();
+  history.push({ json: snap, label: label || null, at: new Date() });
+  if (history.length > 120) history.shift();
   historyIndex = history.length - 1;
   updateHistoryButtons();
+  renderHistory();
 }
-function restore(json) {
+function checkpoint(label) { commit(label); }
+function restore(entry) {
   const chat = doc.chat;
-  doc = JSON.parse(json);
+  doc = JSON.parse(entry.json);
   doc.chat = chat;
   if (pageIndex >= doc.pages.length) pageIndex = doc.pages.length - 1;
   selectedIds = selectedIds.filter((id) => currentPage().layers.some((l) => l.id === id));
   renderCanvas();
   renderStory();
   updateHistoryButtons();
+  renderHistory();
 }
 function undo() { if (historyIndex > 0) { historyIndex -= 1; restore(history[historyIndex]); } }
 function redo() { if (historyIndex < history.length - 1) { historyIndex += 1; restore(history[historyIndex]); } }
 function updateHistoryButtons() {
   document.getElementById("undo").disabled = historyIndex <= 0;
   document.getElementById("redo").disabled = historyIndex >= history.length - 1;
+}
+function renderHistory() {
+  const list = document.getElementById("history-list");
+  if (!list) return;
+  list.innerHTML = "";
+  history.forEach((entry, index) => {
+    if (!entry.label && index !== historyIndex && index !== 0) return; // milestones only
+    const row = document.createElement("div");
+    row.className = "hist-row" + (index === historyIndex ? " now" : "")
+      + (index > historyIndex ? " ahead" : "");
+    const time = entry.at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const label = entry.label || (index === 0 ? "Opened" : "Current edit");
+    row.innerHTML = `<span class="dot"></span><span class="what">${escapeHtml(label)}</span>` +
+      `<span class="when">${time}</span>`;
+    row.addEventListener("click", () => { historyIndex = index; restore(history[index]); });
+    list.prepend(row);
+  });
+  const empty = document.getElementById("history-empty");
+  if (empty) empty.style.display = list.children.length > 1 ? "none" : "block";
 }
 document.getElementById("undo").onclick = undo;
 document.getElementById("redo").onclick = redo;
@@ -1392,6 +1420,7 @@ async function loadEngines() {
   } catch {
     select_.innerHTML = "<option>server offline</option>";
   }
+  showNoEngine(currentPage().layers.some((l) => l.type === "panel"));
 }
 
 function engineReady() {
@@ -1401,6 +1430,7 @@ function engineReady() {
 }
 
 async function generatePanel(layer) {
+  if (!engineReady()) throw new Error("no image engine configured");
   const response = await fetch(`${SERVER}/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1443,65 +1473,153 @@ document.getElementById("generate").onclick = async () => {
   }
 };
 
-// The agent's page plan: create the layers it staged, then render each
-// panel's art with the engine picked in the top bar.
-const clampNum = (v, lo, hi, fallback) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n))) : fallback;
+// ------------------------------------------------------- page layout --
+// Panel geometry is computed here, never by the language model: a model
+// has no spatial sense and produces overlapping, ragged pages. Tiers of
+// varying height, wider gutters between tiers than within one (standard
+// comics practice), manga pages read right to left.
+const MARGIN = Math.round(PAGE.w * 0.045);
+const GUTTER_X = Math.round(PAGE.w * 0.018);
+const GUTTER_Y = Math.round(PAGE.w * 0.03);
+
+// Each template is a list of tiers: height weight + column weights.
+// Chosen so the opening and closing beats get the most area.
+const PAGE_TEMPLATES = {
+  1: [[1, [1]]],
+  2: [[1.15, [1]], [1, [1]]],
+  3: [[1.25, [1]], [1, [1, 1]]],
+  4: [[1, [1, 1]], [1.1, [1, 1]]],
+  5: [[1.2, [1]], [1, [1, 1]], [1, [1, 1]]],
+  6: [[1, [1, 1]], [1, [1, 1]], [1, [1, 1]]],
+  7: [[1.15, [1]], [1, [1, 1]], [1, [1, 1]], [1, [1, 1]]],
+  8: [[1, [1, 1]], [1, [1, 1]], [1, [1, 1]], [1, [1, 1]]],
 };
-function agentGrid(index, total) {
-  const cols = total > 1 ? 2 : 1;
-  const rows = Math.ceil(total / cols);
-  const g = 16;
-  const w = Math.floor((PAGE.w - g * (cols + 1)) / cols);
-  const h = Math.floor((PAGE.h - g * (rows + 1)) / rows);
-  return {
-    x: g + (index % cols) * (w + g),
-    y: g + Math.floor(index / cols) * (h + g),
-    w, h,
-  };
-}
-async function applyAgentPanels(panels) {
-  const created = [];
-  panels.slice(0, 8).forEach((p, i) => {
-    const grid = agentGrid(i, Math.min(panels.length, 8));
-    const geo = {
-      x: clampNum(p.x, 0, PAGE.w - 80, grid.x),
-      y: clampNum(p.y, 0, PAGE.h - 80, grid.y),
-      w: clampNum(p.w, 80, PAGE.w, grid.w),
-      h: clampNum(p.h, 80, PAGE.h, grid.h),
-    };
-    if (geo.x + geo.w > PAGE.w) geo.w = PAGE.w - geo.x;
-    if (geo.y + geo.h > PAGE.h) geo.h = PAGE.h - geo.y;
-    const layer = addLayer("panel", geo);
-    layer.props.prompt = String(p.prompt || "").slice(0, 2000);
-    created.push(layer);
-    (Array.isArray(p.dialogue) ? p.dialogue : []).slice(0, 6).forEach((d) => {
-      const kind = ["balloon", "caption", "sfx"].includes(d.kind) ? d.kind : "balloon";
-      const dl = addLayer(kind, {
-        x: clampNum(d.x, 0, PAGE.w - 60, geo.x + 24),
-        y: clampNum(d.y, 0, PAGE.h - 40, geo.y + 24),
-      });
-      dl.props.text = String(d.text || "").slice(0, 300);
+
+function pageLayout(count) {
+  const tiers = PAGE_TEMPLATES[Math.min(Math.max(count, 1), 8)];
+  const rightToLeft = doc.kind === "manga";
+  const innerW = PAGE.w - MARGIN * 2;
+  const innerH = PAGE.h - MARGIN * 2;
+  const weightSum = tiers.reduce((sum, [hw]) => sum + hw, 0);
+  const usableH = innerH - GUTTER_Y * (tiers.length - 1);
+  const rects = [];
+  let y = MARGIN;
+  tiers.forEach(([heightWeight, cols]) => {
+    const h = Math.round((usableH * heightWeight) / weightSum);
+    const usableW = innerW - GUTTER_X * (cols.length - 1);
+    const colSum = cols.reduce((a, b) => a + b, 0);
+    let x = MARGIN;
+    const tierRects = cols.map((cw) => {
+      const w = Math.round((usableW * cw) / colSum);
+      const rect = { x, y, w, h };
+      x += w + GUTTER_X;
+      return rect;
     });
+    // manga reads right to left: first beat sits at the right edge
+    rects.push(...(rightToLeft ? tierRects.reverse() : tierRects));
+    y += h + GUTTER_Y;
+  });
+  return rects.slice(0, count);
+}
+
+// Lettering is placed relative to its panel so balloons always land
+// inside the art they belong to.
+function placeDialogue(panelRect, entries) {
+  const placed = [];
+  let balloonRow = 0;
+  let captionCount = 0;
+  entries.forEach((entry) => {
+    const kind = ["balloon", "caption", "sfx"].includes(entry.kind) ? entry.kind : "balloon";
+    const text = String(entry.text || "").slice(0, 300);
+    if (!text) return;
+    if (kind === "balloon") {
+      const w = Math.round(Math.min(panelRect.w * 0.46, 230));
+      const rightSide = entry.speaker === "right" || (entry.speaker !== "left" && balloonRow % 2 === 1);
+      placed.push({
+        kind, text, w,
+        x: rightSide ? panelRect.x + panelRect.w - w - Math.round(panelRect.w * 0.06)
+                     : panelRect.x + Math.round(panelRect.w * 0.06),
+        y: panelRect.y + Math.round(panelRect.h * 0.08) + balloonRow * Math.round(panelRect.h * 0.22),
+      });
+      balloonRow += 1;
+    } else if (kind === "caption") {
+      const w = Math.round(Math.min(panelRect.w * 0.5, 280));
+      placed.push({
+        kind, text, w,
+        x: panelRect.x + Math.round(panelRect.w * 0.04),
+        // first caption tops the panel, a second one anchors the bottom
+        y: captionCount === 0
+          ? panelRect.y + Math.round(panelRect.h * 0.04)
+          : panelRect.y + panelRect.h - Math.round(panelRect.h * 0.16),
+      });
+      captionCount += 1;
+    } else {
+      placed.push({
+        kind, text,
+        w: Math.round(panelRect.w * 0.7),
+        fontSize: Math.round(Math.min(panelRect.w * 0.13, 96)),
+        x: panelRect.x + Math.round(panelRect.w * 0.18),
+        y: panelRect.y + Math.round(panelRect.h * 0.42),
+      });
+    }
+  });
+  return placed;
+}
+
+// The agent's page plan: lay the page out here, create the layers, then
+// render each panel's art with the engine picked in the top bar.
+async function applyAgentPanels(panels, opts = {}) {
+  const plan = panels.slice(0, 8).filter((p) => p && p.prompt);
+  if (!plan.length) return;
+  if (opts.replacePage) {
+    currentPage().layers = [];
+    selectedIds = [];
+  }
+  const rects = pageLayout(plan.length);
+  const created = [];
+  plan.forEach((p, i) => {
+    const rect = rects[i];
+    const layer = addLayer("panel", rect);
+    layer.props.prompt = String(p.prompt).slice(0, 2000);
+    layer.name = `Panel ${i + 1}`;
+    created.push(layer);
+    placeDialogue(rect, Array.isArray(p.dialogue) ? p.dialogue.slice(0, 5) : [])
+      .forEach((d) => {
+        const dl = addLayer(d.kind, { x: d.x, y: d.y, w: d.w });
+        dl.props.text = d.text;
+        if (d.fontSize) dl.props.fontSize = d.fontSize;
+      });
   });
   select(null);
   renderCanvas();
-  commit();
+  checkpoint(`Agent page: ${plan.length} panels`);
   if (!engineReady()) {
-    toast(`${created.length} panels staged. Pick an engine to render the art.`, true);
+    showNoEngine(true);
+    toast(`${created.length} panels laid out. No image engine configured.`, true);
     return;
   }
   for (let i = 0; i < created.length; i += 1) {
-    toast(`Rendering panel ${i + 1}/${created.length}…`);
+    setBusy(`Rendering panel ${i + 1} of ${created.length}`);
     try {
       await generatePanel(created[i]);
     } catch (error) {
       toast(`Panel ${i + 1}: ${error.message}`, true);
     }
   }
-  commit();
+  setBusy(null);
+  checkpoint("Page rendered");
   toast("Page rendered");
+}
+
+// Re-flow the current page's panels through the layout engine.
+function relayoutPage() {
+  const panels = currentPage().layers.filter((l) => l.type === "panel");
+  if (!panels.length) { toast("No panels on this page"); return; }
+  const rects = pageLayout(panels.length);
+  panels.forEach((panel, i) => Object.assign(panel, rects[i]));
+  renderCanvas();
+  checkpoint("Re-flow page");
+  toast(`${panels.length} panels re-flowed`);
 }
 
 // ----------------------------------------------------------------- story --
@@ -1509,6 +1627,7 @@ document.getElementById("story-analyze").onclick = async () => {
   const button = document.getElementById("story-analyze");
   button.disabled = true;
   button.textContent = "Analyzing…";
+  setBusy("Reading the story so far");
   try {
     const pages = doc.pages.map((page, index) => ({
       index: index + 1,
@@ -1525,10 +1644,11 @@ document.getElementById("story-analyze").onclick = async () => {
     if (!result.ok) throw new Error(result.error || "story engine failed");
     doc.story = { chapter: result.chapter, overall: result.overall, flags: result.flags };
     renderStory();
-    commit();
+    commit("Story analysis");
   } catch (error) {
     toast(error.message, true);
   } finally {
+    setBusy(null);
     button.disabled = false;
     button.textContent = "Analyze story so far";
   }
@@ -1580,6 +1700,61 @@ document.getElementById("export").onclick = async () => {
   if (saved) toast("Exported " + saved);
 };
 
+// ---------------------------------------------------- status + layout ui --
+// Long local-model calls must never look frozen: show what is running
+// and how long it has been going.
+let busyTimer = null;
+function setBusy(text) {
+  const bar = document.getElementById("busy");
+  if (!text) {
+    clearInterval(busyTimer);
+    busyTimer = null;
+    bar.classList.remove("show");
+    return;
+  }
+  const started = Date.now();
+  bar.classList.add("show");
+  const tick = () => {
+    const seconds = Math.round((Date.now() - started) / 1000);
+    bar.innerHTML = `<span class="spin"></span>${escapeHtml(text)}<span class="secs">${seconds}s</span>`;
+  };
+  tick();
+  clearInterval(busyTimer);
+  busyTimer = setInterval(tick, 1000);
+}
+
+function showNoEngine(show) {
+  document.getElementById("no-engine").classList.toggle("show",
+    show && !engineReady() && !currentPage().layers.some((l) => l.props && l.props.image));
+}
+
+// Draggable splitter: the right dock is resizable and the width sticks.
+const dockWidth = parseInt(localStorage.getItem("studio-dock-w"), 10);
+if (dockWidth) document.body.style.setProperty("--dock-w", dockWidth + "px");
+(() => {
+  const handle = document.getElementById("dock-resize");
+  let dragging = false;
+  handle.addEventListener("mousedown", (event) => {
+    dragging = true;
+    event.preventDefault();
+    document.body.style.cursor = "col-resize";
+  });
+  window.addEventListener("mousemove", (event) => {
+    if (!dragging) return;
+    const width = Math.min(620, Math.max(240, window.innerWidth - event.clientX));
+    document.body.style.setProperty("--dock-w", width + "px");
+    stage.size({ width: wrap.clientWidth, height: wrap.clientHeight });
+    applyView();
+  });
+  window.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.style.cursor = "";
+    localStorage.setItem("studio-dock-w",
+      parseInt(getComputedStyle(document.body).getPropertyValue("--dock-w"), 10));
+  });
+})();
+
 // ----------------------------------------------------------------- misc --
 function toast(message, isError) {
   const box = document.getElementById("toast");
@@ -1630,6 +1805,7 @@ async function sendChat() {
   appendMsg("user", text);
   doc.chat.push({ role: "user", content: text });
   const thinking = appendMsg("agent", "…");
+  setBusy("Directing the page");
   try {
     const pages = doc.pages.map((page, index) => ({
       index: index + 1,
@@ -1649,11 +1825,17 @@ async function sendChat() {
     if (!result.ok) throw new Error(result.error || "agent unavailable");
     thinking.textContent = result.reply;
     doc.chat.push({ role: "assistant", content: result.reply });
+    setBusy(null);
     if (Array.isArray(result.panels) && result.panels.length) {
-      applyAgentPanels(result.panels); // builds layers, then renders art
+      // a page plan replaces the current page rather than piling layers
+      // on top of what is already there
+      const hasPanels = currentPage().layers.some((l) => l.type === "panel");
+      await applyAgentPanels(result.panels, { replacePage: hasPanels });
     }
   } catch (error) {
     thinking.textContent = "Agent offline: " + error.message;
+  } finally {
+    setBusy(null);
   }
 }
 function appendMsg(kind, text) {
@@ -1709,9 +1891,17 @@ document.querySelectorAll(".dock-tab").forEach((tab) => {
     document.querySelector(`.dock-page[data-page="${tab.dataset.page}"]`).classList.add("active");
   });
 });
+document.getElementById("relayout").onclick = relayoutPage;
+document.getElementById("no-engine-settings").onclick = () => {
+  document.getElementById("no-engine").classList.remove("show");
+  document.getElementById("settings-btn").click();
+};
+document.getElementById("no-engine-dismiss").onclick = () =>
+  document.getElementById("no-engine").classList.remove("show");
+
 fitPage();
 renderCanvas();
 renderStory();
 loadEngines();
 pollHealth();
-commit();
+commit("Opened");

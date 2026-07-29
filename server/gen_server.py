@@ -31,6 +31,9 @@ from pathlib import Path
 
 HOST = os.environ.get("STUDIO_HOST", "127.0.0.1")
 PORT = int(os.environ.get("STUDIO_PORT", "8787"))
+# Reported by /health so a stale server left running on the port is
+# obvious instead of silently serving old code.
+BUILD = "0.4.0"
 KEYS_PATH = Path(__file__).with_name("keys.json")
 AUTH_TOKEN = os.environ.get("STUDIO_AUTH_TOKEN")
 DISTILL_REPO = os.environ.get("DISTILL_REPO")  # private research repo (dev only)
@@ -67,6 +70,94 @@ def http_json(url: str, payload: dict, headers: dict, timeout: int = 300) -> dic
 def http_get_bytes(url: str, timeout: int = 300) -> bytes:
     with urllib.request.urlopen(url, timeout=timeout) as response:
         return response.read()
+
+
+# --------------------------------------------------------- local gpu engine --
+# Free, private, offline image generation on the user's own GPU through
+# diffusers. Requires the server to run under an interpreter with a CUDA
+# build of torch (see .venv-image); otherwise it stays unavailable and
+# the hosted engines are used instead.
+GPU_MODEL = os.environ.get("LOCAL_IMAGE_MODEL", "cagliostrolab/animagine-xl-4.0")
+GPU_NEGATIVE = os.environ.get(
+    "LOCAL_IMAGE_NEGATIVE",
+    "lowres, worst quality, low quality, bad anatomy, bad hands, extra digits, "
+    "fewer digits, jpeg artifacts, signature, watermark, username, text, "
+    "speech bubble, caption, letters, blurry",
+)
+_gpu_pipe = None
+_gpu_lock = threading.Lock()
+_gpu_state = {"loading": False, "error": None}
+
+
+def gpu_capable() -> bool:
+    try:
+        import torch
+        return bool(torch.cuda.is_available())
+    except Exception:
+        return False
+
+
+def gpu_model_present() -> bool:
+    # Weights are cached by huggingface_hub; presence means no surprise
+    # multi-gigabyte download on the first click.
+    try:
+        from huggingface_hub import try_to_load_from_cache
+        hit = try_to_load_from_cache(GPU_MODEL, "model_index.json")
+        return isinstance(hit, str)
+    except Exception:
+        return False
+
+
+def gpu_available() -> bool:
+    return gpu_capable() and gpu_model_present()
+
+
+def gpu_pipeline():
+    global _gpu_pipe
+    with _gpu_lock:
+        if _gpu_pipe is None:
+            import torch
+            from diffusers import StableDiffusionXLPipeline
+            _gpu_state["loading"] = True
+            try:
+                # diffusers ignores a bare dtype= kwarg: torch_dtype is
+                # the one that actually takes effect
+                pipe = StableDiffusionXLPipeline.from_pretrained(
+                    GPU_MODEL, torch_dtype=torch.float16, use_safetensors=True,
+                    add_watermarker=False,
+                )
+                pipe = pipe.to("cuda")
+                pipe.set_progress_bar_config(disable=True)
+                # keeps peak VRAM well inside a 16 GB card at 1024 px
+                pipe.enable_vae_tiling()
+                if pipe.dtype != torch.float16:
+                    raise RuntimeError(f"expected fp16 pipeline, got {pipe.dtype}")
+                _gpu_pipe = pipe
+                _gpu_state["error"] = None
+            except Exception as error:
+                _gpu_state["error"] = str(error)
+                raise
+            finally:
+                _gpu_state["loading"] = False
+        return _gpu_pipe
+
+
+def generate_gpu(prompt: str, seed: int, width: int, height: int) -> bytes:
+    import io
+    import torch
+    pipe = gpu_pipeline()
+    generator = torch.Generator("cuda").manual_seed(seed)
+    image = pipe(
+        prompt=prompt,
+        negative_prompt=GPU_NEGATIVE,
+        width=width, height=height,
+        num_inference_steps=int(os.environ.get("LOCAL_IMAGE_STEPS", "28")),
+        guidance_scale=float(os.environ.get("LOCAL_IMAGE_CFG", "5.0")),
+        generator=generator,
+    ).images[0]
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 # ------------------------------------------------------- optional dev engine --
@@ -232,7 +323,9 @@ def llm_chat(current: dict, system: str, messages: list, max_tokens: int = 900,
                     "model": model, "stream": False, "format": "json",
                     "think": False,  # skip reasoning: json needs speed, not deliberation
                     "messages": full_messages,
-                    "options": {"num_predict": max(max_tokens, 4000)},
+                    # thinking is off here, so the budget is the answer
+                    # itself: no 4000-token floor to grind through
+                    "options": {"num_predict": max_tokens},
                 }
                 try:
                     result = http_json(native + "/api/chat", native_req, {}, timeout=300)
@@ -340,24 +433,53 @@ def analyze_story(payload: dict, current: dict) -> dict:
 
 AGENT_SYSTEM = (
     "You are the page director inside prod-imagen studio, a layered "
-    "canvas tool for manga, anime, posters and illustration. You do not "
-    "just talk: you BUILD pages. You always answer with raw JSON, no "
+    "canvas tool for manga, anime, posters and illustration. You BUILD "
+    "pages; you never write essays. Answer with raw JSON only, no "
     "markdown, no code fences, in exactly this shape: "
-    '{"reply": "one or two sentences for the user", "panels": [{"x": 0, '
-    '"y": 0, "w": 0, "h": 0, "prompt": "detailed art prompt: subject, '
-    'action, camera angle, lighting, style; never any lettering or text '
-    'in the image", "dialogue": [{"kind": "balloon", "text": "SHORT '
-    'line", "x": 0, "y": 0}]}]}. '
-    "dialogue kind is balloon, caption or sfx. Coordinates are page "
-    "pixels; the page size is in the context. Panels must tile the page "
-    "with 12 to 24 px gutters and must not overlap. Balloons go inside "
-    "their panel near the speaker's head space; captions at panel top or "
-    "bottom edges; sfx overlap the action, 1 or 2 loud words. "
+    '{"reply": "at most 15 words", "panels": [{"prompt": "art prompt: '
+    'subject, action, camera angle, lighting, style", "dialogue": '
+    '[{"kind": "balloon", "text": "SHORT line", "speaker": "left"}]}]}. '
+    "The application places every panel on the page for you: never "
+    "output coordinates, sizes, panel numbers or layout instructions. "
+    "Panel order is reading order. "
+    "Each prompt describes ONLY what the art shows and must never ask "
+    "for lettering, captions, speech balloons or any written words in "
+    "the image; the words go in the dialogue list, which the app draws "
+    "as real text. dialogue kind is balloon, caption or sfx; speaker is "
+    "left or right. sfx is one or two loud words. "
     "When the user describes a scene, page or story beat, return 2 to 6 "
-    "panels that stage it with strong pacing. When they ask a plain "
-    "question and no page should be built, return \"panels\": []. "
-    "Keep the reply short: what you built and one directorial note."
+    "panels that stage it with strong pacing. Only when they ask a "
+    "plain factual question, return \"panels\": [] and answer in the "
+    "reply. The reply is a status line, never the content itself: say "
+    "what you built, nothing more. Never put panel descriptions, "
+    "dialogue or lists in the reply."
 )
+
+BUILD_HINT = (
+    "You returned no panels. The user wants a page built. Return the "
+    "JSON with 2 to 6 panels now, reply at most 15 words."
+)
+
+
+def looks_like_build_request(messages: list) -> bool:
+    if not messages:
+        return False
+    last = messages[-1].get("content", "").lower()
+    if len(last.split()) < 4:
+        return False
+    asking = last.lstrip().startswith((
+        "what", "why", "how", "when", "who", "which", "is ", "are ", "can ", "do ",
+    ))
+    return not asking
+
+
+def short_reply(text: str, limit: int = 160) -> str:
+    line = " ".join(str(text).split())
+    if len(line) <= limit:
+        return line
+    cut = line[:limit]
+    stop = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+    return (cut[:stop + 1] if stop > 40 else cut.rstrip() + "...").strip()
 
 
 def parse_agent_json(text: str) -> dict:
@@ -387,7 +509,6 @@ def agent_chat(payload: dict, current: dict) -> dict:
     context = json.dumps({
         "project": payload.get("project"),
         "kind": payload.get("kind"),
-        "page_size": payload.get("page_size"),
         "pages": payload.get("pages", []),
     })
     messages = [
@@ -395,9 +516,32 @@ def agent_chat(payload: dict, current: dict) -> dict:
         for m in payload.get("messages", [])
         if m.get("role") in ("user", "assistant")
     ] or [{"role": "user", "content": "hello"}]
-    text = llm_chat(current, AGENT_SYSTEM + " Current project context: " + context,
-                    messages, max_tokens=1600, json_mode=True)
-    return parse_agent_json(text)
+    system = AGENT_SYSTEM + " Current project context: " + context
+    result = parse_agent_json(llm_chat(current, system, messages,
+                                       max_tokens=1400, json_mode=True))
+    if not result["panels"] and looks_like_build_request(messages):
+        # the model lapsed into prose: demand the page once more
+        result = parse_agent_json(llm_chat(
+            current, system, messages + [{"role": "user", "content": BUILD_HINT}],
+            max_tokens=1400, json_mode=True))
+    panels = []
+    for panel in result["panels"][:8]:
+        if not isinstance(panel, dict) or not panel.get("prompt"):
+            continue
+        dialogue = [
+            {
+                "kind": d.get("kind", "balloon"),
+                "text": str(d.get("text", ""))[:300],
+                "speaker": d.get("speaker"),
+            }
+            for d in (panel.get("dialogue") or [])
+            if isinstance(d, dict) and d.get("text")
+        ]
+        panels.append({"prompt": str(panel["prompt"])[:2000], "dialogue": dialogue[:5]})
+    reply = short_reply(result["reply"])
+    if panels and (len(reply) > 160 or not reply):
+        reply = f"Built a {len(panels)} panel page."
+    return {"reply": reply, "panels": panels}
 
 
 # -------------------------------------------------------------------- server --
@@ -409,6 +553,12 @@ def engine_table(current: dict) -> list:
     ]
     if local_available():
         table.insert(0, {"id": "local-dev", "label": "Local dev engine", "available": True})
+    if gpu_capable():
+        table.insert(0, {
+            "id": "local-gpu",
+            "label": "Local GPU (free, private)",
+            "available": gpu_model_present(),
+        })
     return table
 
 
@@ -437,8 +587,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/health":
             self._json(200, {
                 "ok": True,
+                "build": BUILD,
                 "auth": bool(AUTH_TOKEN),
-                "local": local_available(),
+                "local": gpu_available() or local_available(),
                 "apis": any([current["ideogram"], current["openai"], current["bfl"]]),
                 "story": bool(current["anthropic"]) or local_llm_reachable(current),
             })
@@ -483,7 +634,11 @@ class Handler(BaseHTTPRequestHandler):
         seed = int(seed) if seed is not None else int(time.time() * 997) % 2_000_000
         started = time.perf_counter()
         try:
-            if engine == "local-dev":
+            if engine == "local-gpu":
+                image = generate_gpu(prompt, seed,
+                                     int(payload.get("width", 1024)),
+                                     int(payload.get("height", 1024)))
+            elif engine == "local-dev":
                 image = generate_local(prompt, seed)
             elif engine == "ideogram":
                 if not current["ideogram"]:
