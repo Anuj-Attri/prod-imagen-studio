@@ -184,8 +184,47 @@ function selectedLayers() { return selectedIds.map(findLayer).filter(Boolean); }
 // unlabelled ones are ordinary edit steps.
 let history = [];
 let historyIndex = -1;
+// Undo snapshots must not carry image data. A rendered page is several
+// megabytes of base64, the history keeps many entries, and a chapter
+// would put gigabytes of duplicated pixels in memory. Images are
+// immutable once generated, so the history stores a reference and the
+// pixels live once in a side table.
+const imageStore = new Map();   // reference -> data url
+const imageRefs = new Map();    // data url -> reference
+let imageSeq = 0;
+
+function imageRef(dataUrl) {
+  let ref = imageRefs.get(dataUrl);
+  if (!ref) {
+    ref = "imgref:" + (imageSeq += 1);
+    imageRefs.set(dataUrl, ref);
+    imageStore.set(ref, dataUrl);
+  }
+  return ref;
+}
+
 function snapshotDoc() {
-  return JSON.stringify(doc, (key, value) => (key === "chat" ? undefined : value));
+  return JSON.stringify(doc, (key, value) => {
+    if (key === "chat") return undefined;
+    if (key === "image" && typeof value === "string" && value.startsWith("data:")) {
+      return imageRef(value);
+    }
+    return value;
+  });
+}
+
+// Put the pixels back after a snapshot is parsed.
+function rehydrateImages(value) {
+  if (Array.isArray(value)) { value.forEach(rehydrateImages); return; }
+  if (!value || typeof value !== "object") return;
+  Object.keys(value).forEach((key) => {
+    const child = value[key];
+    if (key === "image" && typeof child === "string" && child.startsWith("imgref:")) {
+      value[key] = imageStore.get(child) || null;
+    } else {
+      rehydrateImages(child);
+    }
+  });
 }
 function commit(label) {
   const snap = snapshotDoc();
@@ -204,6 +243,7 @@ function checkpoint(label) { commit(label); }
 function restore(entry) {
   const chat = doc.chat;
   doc = JSON.parse(entry.json);
+  rehydrateImages(doc);
   doc.chat = chat;
   if (pageIndex >= doc.pages.length) pageIndex = doc.pages.length - 1;
   selectedIds = selectedIds.filter((id) => currentPage().layers.some((l) => l.id === id));

@@ -370,6 +370,37 @@ check("reopened project rehydrates missing newer fields", () => {
     && hydrated.guides.v.length === 0;
 });
 
+// history must stay small: a rendered chapter is tens of megabytes of
+// base64 per copy, and many copies are kept
+check("history snapshots exclude image data", () => {
+  const big = "data:image/png;base64," + "A".repeat(200000);
+  const layer = addLayer("image", { x: 0, y: 0, w: 100, h: 100 }, { image: big });
+  const snap = snapshotDoc();
+  if (snap.includes("A".repeat(1000))) return "pixels are in the snapshot";
+  return snap.length < 40000 && snap.includes("imgref:");
+});
+check("undo brings the image back", () => {
+  const layer = currentPage().layers.find(l => l.props && l.props.image);
+  const original = layer.props.image;
+  commit("with image");
+  addLayer("rect", { x: 0, y: 0, w: 10, h: 10 });
+  commit("after");
+  undo();
+  const back = currentPage().layers.find(l => l.props && l.props.image);
+  return !!back && back.props.image === original;
+});
+check("a rendered chapter stays small in history", () => {
+  // ten pages each carrying a megabyte of base64
+  const page = "data:image/png;base64," + "B".repeat(1000000);
+  for (let i = 0; i < 10; i += 1) {
+    addPage(false);
+    addLayer("image", { x: 0, y: 0, w: 10, h: 10 }, { image: page + i });
+  }
+  const snap = snapshotDoc();
+  // without references this would be over ten megabytes
+  return snap.length < 200000;
+});
+
 // rulers and guides
 check("rulers render page coordinates", () => {
   document.body.classList.add("rulers-on");
