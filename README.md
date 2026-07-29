@@ -24,7 +24,9 @@ its own paper size, default look and build recipe.
   sheet of permanent appearance tags per character, applied to every
   panel, so a sequence reads as one artist rather than several. Presets
   carry a negative as well, which is what keeps a coloring page as flat
-  line art instead of a painting.
+  line art instead of a painting. Changing the style later does not
+  strand the pages already made: re-render this page, or every page,
+  from the Style tab.
 **Ask again for a different one.** Right click a panel for another take
 and it renders a fresh version; Regenerate exactly repeats the one you
 already have. Seeds stay locked otherwise, so reopening a finished

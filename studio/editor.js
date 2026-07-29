@@ -412,6 +412,11 @@ function renderStylePanel() {
       <div class="prop-note">Applied to every panel on every page, so the
         sequence reads as one artist. Locked seeds make a re-render of an
         unchanged panel come back identical.</div>
+      <label></label><button id="restyle-page" style="width:100%">Re-render this page</button>
+      <label></label><button id="restyle-all" style="width:100%">Re-render every page</button>
+      <div class="prop-note">Art already made keeps the look it was made
+        with. Re-rendering applies the style above to what is already
+        there, which costs a render for each panel.</div>
     </div>
     <div class="dock-section-title">Cast</div>
     <div id="cast-list"></div>
@@ -471,6 +476,10 @@ function renderStylePanel() {
   document.getElementById("style-bg").addEventListener("change", () =>
     commit("Page colour"));
   document.getElementById("style-invert").addEventListener("click", invertPage);
+  document.getElementById("restyle-page").addEventListener("click",
+    () => rerenderPanels("page"));
+  document.getElementById("restyle-all").addEventListener("click",
+    () => rerenderPanels("document"));
   document.getElementById("cast-add").addEventListener("click", () => {
     doc.cast.push({ id: uid(), name: "New character", tags: "" });
     renderStylePanel();
@@ -3012,6 +3021,48 @@ async function applyAgentArtwork(beats, layout) {
   } finally {
     setBusy(null);
   }
+}
+
+// Changing the style is the one edit that invalidates work already done:
+// pages rendered under the old look stay as they were, which is exactly
+// the inconsistency the style contract exists to prevent.
+async function rerenderPanels(scope) {
+  if (!engineReady()) { showNoEngine(true); toast("No image engine configured", true); return 0; }
+  const pages = scope === "page" ? [currentPage()] : doc.pages;
+  const work = [];
+  pages.forEach((page) => {
+    const at = doc.pages.indexOf(page);
+    page.layers.forEach((layer) => {
+      const renderable = (layer.type === "panel" || layer.props.isPage
+        || (layer.type === "image" && layer.props.prompt));
+      if (renderable && layer.props.prompt) work.push({ at, layer });
+    });
+  });
+  if (!work.length) { toast("Nothing on this page was generated"); return 0; }
+
+  const startPage = pageIndex;
+  let done = 0;
+  try {
+    for (let i = 0; i < work.length; i += 1) {
+      const { at, layer } = work[i];
+      if (pageIndex !== at) { pageIndex = at; selectedIds = []; renderCanvas(); }
+      setBusy(`Re-rendering ${i + 1} of ${work.length}`);
+      try {
+        await generatePanel(layer);
+        done += 1;
+      } catch (error) {
+        toast(`${layer.name}: ${error.message}`, true);
+      }
+    }
+  } finally {
+    pageIndex = Math.min(startPage, doc.pages.length - 1);
+    selectedIds = [];
+    renderCanvas();
+    setBusy(null);
+  }
+  if (done) checkpoint(`Re-rendered ${done} panels`);
+  toast(`Re-rendered ${done} of ${work.length}`);
+  return done;
 }
 
 // A greeting card is folded, so the message belongs on a second page.

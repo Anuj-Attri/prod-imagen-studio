@@ -856,6 +856,75 @@ check("asking for another take moves the panel on", () => {
   return findLayer(layer.id).props.take === 1 && panelSeed(layer) !== before;
 });
 
+// Changing the style after pages exist is the edit that would otherwise
+// leave a chapter looking like two chapters.
+check("re-rendering applies the current style across pages", async () => {
+  doc.pages = [];
+  for (let i = 0; i < 2; i += 1) {
+    doc.pages.push({ id: uid(), name: "Page " + (i + 1), layers: [] });
+  }
+  pageIndex = 0;
+  renderCanvas();
+  doc.style.preset = "manga";
+  const made = [];
+  for (let i = 0; i < 2; i += 1) {
+    pageIndex = i;
+    renderCanvas();
+    const panel = addLayer("panel", { x: 0, y: 0, w: 200, h: 150 });
+    panel.props.prompt = "1girl, standing, page " + (i + 1);
+    panel.props.image = "data:image/png;base64,old";
+    made.push(panel);
+  }
+  pageIndex = 0;
+  renderCanvas();
+
+  const engine = document.getElementById("engine");
+  const had = engine.innerHTML;
+  engine.innerHTML = "<option value='local-gpu'>Local GPU</option>";
+  const sent = [];
+  const realFetch = window.fetch;
+  window.fetch = async (url, options) => {
+    sent.push(JSON.parse(options.body).prompt);
+    return { json: async () => ({
+      ok: true, engine: "local-gpu", seed: 1, latency_ms: 1,
+      image_base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    }) };
+  };
+  doc.style.preset = "noir";                 // the style changes after the fact
+  const done = await rerenderPanels("document");
+  window.fetch = realFetch;
+  engine.innerHTML = had;
+
+  if (done !== 2) return "re-rendered " + done + " of 2";
+  // both pages were reached, and both carry the new style
+  if (!sent.every((prompt) => prompt.includes("film noir"))) {
+    return "a panel kept the old style";
+  }
+  return pageIndex === 0 ? true : "did not return to the page it started on";
+});
+check("re-rendering a page leaves the other pages alone", async () => {
+  doc.pages = [
+    { id: uid(), name: "Page 1", layers: [] },
+    { id: uid(), name: "Page 2", layers: [] },
+  ];
+  pageIndex = 1;
+  renderCanvas();
+  const panel = addLayer("panel", { x: 0, y: 0, w: 100, h: 100 });
+  panel.props.prompt = "only this one";
+  pageIndex = 0;
+  renderCanvas();
+  const engine = document.getElementById("engine");
+  const had = engine.innerHTML;
+  engine.innerHTML = "<option value='local-gpu'>Local GPU</option>";
+  const realFetch = window.fetch;
+  let calls = 0;
+  window.fetch = async () => { calls += 1; return { json: async () => ({ ok: false, error: "no" }) }; };
+  await rerenderPanels("page");            // page one holds nothing
+  window.fetch = realFetch;
+  engine.innerHTML = had;
+  return calls === 0;
+});
+
 // layout engine
 check("templates yield their panel count", () => {
   for (let n = 1; n <= 8; n += 1) if (pageLayout(n).length !== n) return "n=" + n;
