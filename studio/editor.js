@@ -628,6 +628,11 @@ const TEXT_TYPES = ["balloon", "caption", "text", "sfx"]; // sized by font
 // ------------------------------------------------------------- pan/zoom --
 let zoom = 1;
 function applyView() {
+  // The inline text editor is a plain element floating at coordinates
+  // worked out when it opened. Moving the view under it would leave it
+  // over the wrong panel, so it commits instead.
+  const editing = document.querySelector("textarea.inline-text-editor");
+  if (editing) editing.blur();
   world.scale({ x: zoom, y: zoom });
   document.getElementById("zoom-pct").textContent = Math.round(zoom * 100) + "%";
   guideLayer.getChildren().forEach((line) => line.strokeWidth(1 / zoom));
@@ -2030,6 +2035,9 @@ function editTextInline(node, layer) {
   const rect = stage.container().getBoundingClientRect();
   const absolute = textNode.getAbsolutePosition(stage);
   const input = document.createElement("textarea");
+  // named so it can be found again: it floats over the canvas and has
+  // to be dealt with when the view moves under it
+  input.className = "inline-text-editor";
   document.body.appendChild(input);
   input.value = layer.props.text;
   Object.assign(input.style, {

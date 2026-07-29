@@ -644,6 +644,37 @@ check("art survives a rebuild without flickering", async () => {
     : "before=" + before + " immediately=" + immediately + " of " + images.length;
 });
 
+// Transitions, not settled state: what is true in the same frame as the
+// change, and what happens when the view moves mid-action.
+check("selection survives a rebuild in the same frame", () => {
+  currentPage().layers = [];
+  const a = addLayer("rect", { x: 10, y: 10, w: 40, h: 40 });
+  const b = addLayer("rect", { x: 60, y: 10, w: 40, h: 40 });
+  selectedIds = [a.id, b.id];
+  syncSelection();
+  const before = transformer.nodes().length;
+  renderCanvas();
+  const after = transformer.nodes().length;
+  return before === 2 && after === 2
+    ? true : "transformer held " + before + " then " + after;
+});
+
+check("moving the view commits an open text editor", () => {
+  currentPage().layers = [];
+  const layer = addLayer("caption", { x: 100, y: 100, w: 200 });
+  renderCanvas();
+  editTextInline(nodes.get(layer.id), layer);
+  const box = document.querySelector("textarea.inline-text-editor");
+  if (!box) return "no editor opened";
+  box.value = "typed while open";
+  setZoom(zoom * 2);
+  // it must not be left floating over whatever is now underneath, and
+  // what was typed must not be thrown away
+  const gone = !document.querySelector("textarea.inline-text-editor");
+  const kept = findLayer(layer.id).props.text === "typed while open";
+  return gone && kept ? true : "gone=" + gone + " kept=" + kept;
+});
+
 // layout engine
 check("templates yield their panel count", () => {
   for (let n = 1; n <= 8; n += 1) if (pageLayout(n).length !== n) return "n=" + n;
