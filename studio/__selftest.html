@@ -263,6 +263,27 @@
       pointer-events: none; z-index: 90; box-shadow: var(--page-bloom);
     }
     #toast.show { opacity: 1; }
+    /* ===== rulers ===== */
+    #ruler-top, #ruler-left, #ruler-corner { display: none; pointer-events: auto; }
+    body.rulers-on #ruler-top, body.rulers-on #ruler-left, body.rulers-on #ruler-corner {
+      display: block; position: absolute; z-index: 18;
+      background: var(--surface); 
+    }
+    body.rulers-on #ruler-top {
+      top: 0; left: 20px; right: 0; height: 20px; width: auto;
+      border-bottom: 1px solid var(--hairline-strong); cursor: row-resize;
+    }
+    body.rulers-on #ruler-left {
+      top: 20px; left: 0; bottom: 0; width: 20px; height: auto;
+      border-right: 1px solid var(--hairline-strong); cursor: col-resize;
+    }
+    body.rulers-on #ruler-corner {
+      top: 0; left: 0; width: 20px; height: 20px;
+      border-right: 1px solid var(--hairline-strong);
+      border-bottom: 1px solid var(--hairline-strong);
+    }
+    /* the canvas sits below the rulers so page coordinates line up */
+    body.rulers-on #canvas-wrap { margin: 20px 0 0 20px; }
     /* ===== busy bar + empty engine state ===== */
     #busy {
       position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
@@ -406,6 +427,9 @@
 
   <div id="canvas-wrap"></div>
   <div id="canvas-overlay">
+    <canvas id="ruler-top"></canvas>
+    <canvas id="ruler-left"></canvas>
+    <div id="ruler-corner"></div>
     <div id="tool-options"></div>
     <div id="no-engine">
       <b>No image engine configured</b>
@@ -691,6 +715,41 @@ check("solid fill stays solid", () => {
   renderCanvas();
   const shape = nodes.get(layer.id).findOne(".shape");
   return shape.fill() === "#00ff00" && !shape.fillLinearGradientColorStops();
+});
+
+// rulers and guides
+check("rulers render page coordinates", () => {
+  document.body.classList.add("rulers-on");
+  drawRulers();
+  const top = document.getElementById("ruler-top");
+  return top.width > 0 && top.height === 20;
+});
+check("ruler step grows as you zoom out", () => {
+  const near = niceStep(2);
+  const far = niceStep(0.1);
+  return far > near;
+});
+check("guides draw and clear", () => {
+  doc.guides.v.push(300);
+  doc.guides.h.push(120);
+  drawGuides();
+  const drawn = guideLayer.getChildren().length;
+  clearGuides();
+  return drawn === 2 && guideLayer.getChildren().length === 0
+    && doc.guides.v.length === 0;
+});
+check("layers snap to a guide", () => {
+  doc.guides.v = [400];
+  const layer = addLayer("rect", { x: 396, y: 50, w: 60, h: 60 });
+  const node = nodes.get(layer.id);
+  select(layer.id);
+  const before = node.getClientRect({ relativeTo: world }).x;
+  snapDrag(node);
+  // the visible edge lands on the guide; the node origin sits half a
+  // stroke inside it, so measure the rect, not the position
+  const after = node.getClientRect({ relativeTo: world }).x;
+  doc.guides.v = [];
+  return Math.abs(after - 400) < 0.6 && after !== before;
 });
 
 // blueprint: exact vector diagram, not generated art

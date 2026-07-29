@@ -173,6 +173,41 @@ check("solid fill stays solid", () => {
   return shape.fill() === "#00ff00" && !shape.fillLinearGradientColorStops();
 });
 
+// rulers and guides
+check("rulers render page coordinates", () => {
+  document.body.classList.add("rulers-on");
+  drawRulers();
+  const top = document.getElementById("ruler-top");
+  return top.width > 0 && top.height === 20;
+});
+check("ruler step grows as you zoom out", () => {
+  const near = niceStep(2);
+  const far = niceStep(0.1);
+  return far > near;
+});
+check("guides draw and clear", () => {
+  doc.guides.v.push(300);
+  doc.guides.h.push(120);
+  drawGuides();
+  const drawn = guideLayer.getChildren().length;
+  clearGuides();
+  return drawn === 2 && guideLayer.getChildren().length === 0
+    && doc.guides.v.length === 0;
+});
+check("layers snap to a guide", () => {
+  doc.guides.v = [400];
+  const layer = addLayer("rect", { x: 396, y: 50, w: 60, h: 60 });
+  const node = nodes.get(layer.id);
+  select(layer.id);
+  const before = node.getClientRect({ relativeTo: world }).x;
+  snapDrag(node);
+  // the visible edge lands on the guide; the node origin sits half a
+  // stroke inside it, so measure the rect, not the position
+  const after = node.getClientRect({ relativeTo: world }).x;
+  doc.guides.v = [];
+  return Math.abs(after - 400) < 0.6 && after !== before;
+});
+
 // blueprint: exact vector diagram, not generated art
 check("blueprint builds boxes and connectors", () => {
   buildBlueprint(

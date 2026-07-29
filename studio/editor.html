@@ -263,6 +263,27 @@
       pointer-events: none; z-index: 90; box-shadow: var(--page-bloom);
     }
     #toast.show { opacity: 1; }
+    /* ===== rulers ===== */
+    #ruler-top, #ruler-left, #ruler-corner { display: none; pointer-events: auto; }
+    body.rulers-on #ruler-top, body.rulers-on #ruler-left, body.rulers-on #ruler-corner {
+      display: block; position: absolute; z-index: 18;
+      background: var(--surface); 
+    }
+    body.rulers-on #ruler-top {
+      top: 0; left: 20px; right: 0; height: 20px; width: auto;
+      border-bottom: 1px solid var(--hairline-strong); cursor: row-resize;
+    }
+    body.rulers-on #ruler-left {
+      top: 20px; left: 0; bottom: 0; width: 20px; height: auto;
+      border-right: 1px solid var(--hairline-strong); cursor: col-resize;
+    }
+    body.rulers-on #ruler-corner {
+      top: 0; left: 0; width: 20px; height: 20px;
+      border-right: 1px solid var(--hairline-strong);
+      border-bottom: 1px solid var(--hairline-strong);
+    }
+    /* the canvas sits below the rulers so page coordinates line up */
+    body.rulers-on #canvas-wrap { margin: 20px 0 0 20px; }
     /* ===== busy bar + empty engine state ===== */
     #busy {
       position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
@@ -406,6 +427,9 @@
 
   <div id="canvas-wrap"></div>
   <div id="canvas-overlay">
+    <canvas id="ruler-top"></canvas>
+    <canvas id="ruler-left"></canvas>
+    <div id="ruler-corner"></div>
     <div id="tool-options"></div>
     <div id="no-engine">
       <b>No image engine configured</b>

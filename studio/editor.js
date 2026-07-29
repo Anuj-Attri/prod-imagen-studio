@@ -495,8 +495,10 @@ const transformer = new Konva.Transformer({
   anchorStroke: "#5b8def", anchorFill: "#141417", ignoreStroke: true,
 });
 world.add(transformer);
-const guides = new Konva.Group({ listening: false });
+const guides = new Konva.Group({ listening: false });   // transient snap lines
+const guideLayer = new Konva.Group({ listening: false }); // persistent guides
 world.add(guides);
+world.add(guideLayer);
 
 const nodes = new Map(); // layerId -> Konva node
 
@@ -518,6 +520,8 @@ let zoom = 1;
 function applyView() {
   world.scale({ x: zoom, y: zoom });
   document.getElementById("zoom-pct").textContent = Math.round(zoom * 100) + "%";
+  guideLayer.getChildren().forEach((line) => line.strokeWidth(1 / zoom));
+  drawRulers();
   pageLayer.batchDraw();
   uiLayer.batchDraw();
 }
@@ -959,13 +963,133 @@ transformer.on("transformend", () => {
   commit();
 });
 
+// --------------------------------------------------------------- rulers --
+// Rulers read page coordinates, not screen pixels: a mark at 500 sits at
+// x=500 on the page whatever the zoom. Dragging off a ruler drops a
+// guide, and layers snap to guides like any other edge.
+doc.guides = doc.guides || { v: [], h: [] };
+let rulersOn = localStorage.getItem("studio-rulers") !== "off";
+
+function niceStep(pixelsPerUnit) {
+  const targets = [1, 2, 5, 10, 25, 50, 100, 250, 500, 1000];
+  return targets.find((t) => t * pixelsPerUnit >= 60) || 1000;
+}
+
+function drawRulers() {
+  const top = document.getElementById("ruler-top");
+  const left = document.getElementById("ruler-left");
+  if (!top || !left) return;
+  document.body.classList.toggle("rulers-on", rulersOn);
+  if (!rulersOn) return;
+
+  const width = Math.max(wrap.clientWidth, 1);
+  const height = Math.max(wrap.clientHeight, 1);
+  top.width = width; top.height = 20;
+  left.width = 20; left.height = height;
+  const styles = getComputedStyle(document.documentElement);
+  const ink = styles.getPropertyValue("--ink-3").trim() || "#888";
+  const stroke = styles.getPropertyValue("--hairline-strong").trim() || "#555";
+  const step = niceStep(zoom);
+
+  const axis = (context, length, offset, horizontal) => {
+    context.clearRect(0, 0, horizontal ? length : 20, horizontal ? 20 : length);
+    context.strokeStyle = stroke;
+    context.fillStyle = ink;
+    context.font = "9px 'Segoe UI', sans-serif";
+    context.beginPath();
+    const first = Math.floor((-offset / zoom) / step) * step;
+    const last = first + length / zoom + step;
+    for (let value = first; value <= last; value += step) {
+      const at = Math.round(value * zoom + offset) + 0.5;
+      if (at < 0 || at > length) continue;
+      if (horizontal) {
+        context.moveTo(at, 13); context.lineTo(at, 20);
+        context.fillText(String(value), at + 2, 9);
+      } else {
+        context.moveTo(13, at); context.lineTo(20, at);
+        context.save();
+        context.translate(9, at - 2);
+        context.rotate(-Math.PI / 2);
+        context.fillText(String(value), 0, 0);
+        context.restore();
+      }
+    }
+    context.stroke();
+  };
+  axis(top.getContext("2d"), width, world.x(), true);
+  axis(left.getContext("2d"), height, world.y(), false);
+}
+
+function drawGuides() {
+  guideLayer.destroyChildren();
+  doc.guides.v.forEach((x) => guideLayer.add(new Konva.Line({
+    points: [x, -4000, x, 4000], stroke: "#3ba7c9", strokeWidth: 1 / zoom, listening: false,
+  })));
+  doc.guides.h.forEach((y) => guideLayer.add(new Konva.Line({
+    points: [-4000, y, 4000, y], stroke: "#3ba7c9", strokeWidth: 1 / zoom, listening: false,
+  })));
+  pageLayer.batchDraw();
+}
+
+function setupRulerDragging() {
+  [["ruler-top", "v"], ["ruler-left", "h"]].forEach(([id, which]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      const rect = wrap.getBoundingClientRect();
+      const preview = (moveEvent) => {
+        const at = toWorld({
+          x: moveEvent.clientX - rect.left,
+          y: moveEvent.clientY - rect.top,
+        });
+        drawGuides();
+        guideLayer.add(new Konva.Line({
+          points: which === "v" ? [at.x, -4000, at.x, 4000] : [-4000, at.y, 4000, at.y],
+          stroke: "#3ba7c9", strokeWidth: 1 / zoom, dash: [4, 4], listening: false,
+        }));
+        pageLayer.batchDraw();
+      };
+      const drop = (upEvent) => {
+        window.removeEventListener("mousemove", preview);
+        window.removeEventListener("mouseup", drop);
+        const pointer = { x: upEvent.clientX - rect.left, y: upEvent.clientY - rect.top };
+        // let go back over the ruler to cancel
+        if (pointer.x < 0 || pointer.y < 0) { drawGuides(); return; }
+        const at = toWorld(pointer);
+        if (which === "v") doc.guides.v.push(Math.round(at.x));
+        else doc.guides.h.push(Math.round(at.y));
+        drawGuides();
+        commit("Add guide");
+      };
+      window.addEventListener("mousemove", preview);
+      window.addEventListener("mouseup", drop);
+    });
+  });
+}
+
+function clearGuides() {
+  doc.guides = { v: [], h: [] };
+  drawGuides();
+  commit("Clear guides");
+  toast("Guides cleared");
+}
+
+function toggleRulers() {
+  rulersOn = !rulersOn;
+  localStorage.setItem("studio-rulers", rulersOn ? "on" : "off");
+  document.body.classList.toggle("rulers-on", rulersOn);
+  stage.size({ width: wrap.clientWidth, height: wrap.clientHeight });
+  applyView();
+}
+
 // -------------------------------------------------------------- snapping --
 function snapDrag(node) {
   guides.destroyChildren();
   const tol = 6 / zoom;
   const r = node.getClientRect({ relativeTo: world });
-  const xs = [0, PAGE.w / 2, PAGE.w];
-  const ys = [0, PAGE.h / 2, PAGE.h];
+  const xs = [0, PAGE.w / 2, PAGE.w, ...doc.guides.v];
+  const ys = [0, PAGE.h / 2, PAGE.h, ...doc.guides.h];
   currentPage().layers.forEach((layer) => {
     if (selectedIds.includes(layer.id) || !layer.visible) return;
     const other = nodes.get(layer.id);
@@ -3126,6 +3250,8 @@ const MENU_ACTIONS = {
   "zoom-out": () => setZoom(zoom / 1.2),
   "zoom-fit": fitPage,
   theme: () => document.getElementById("theme-toggle").click(),
+  rulers: toggleRulers,
+  "clear-guides": clearGuides,
   settings: () => document.getElementById("settings-btn").click(),
   "page-next": () => goToPage(pageIndex + 1),
   "page-prev": () => goToPage(pageIndex - 1),
@@ -3167,6 +3293,9 @@ const MENUS = [
     ["Fit Page", "zoom-fit", "Ctrl+0"],
     ["-"],
     ["Toggle Light / Dark", "theme"],
+    ["-"],
+    ["Rulers", "rulers", "Ctrl+R"],
+    ["Clear Guides", "clear-guides"],
     ["Settings...", "settings"],
   ]],
   ["Page", [
@@ -3243,6 +3372,8 @@ document.getElementById("no-engine-settings").onclick = () => {
 document.getElementById("no-engine-dismiss").onclick = () =>
   document.getElementById("no-engine").classList.remove("show");
 
+setupRulerDragging();
+drawGuides();
 fitPage();
 renderCanvas();
 renderStory();
