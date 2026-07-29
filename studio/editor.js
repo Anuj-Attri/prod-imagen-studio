@@ -593,6 +593,21 @@ function toWorld(pointer) {
 // A flat colour is not enough for poster and card backgrounds. Konva
 // takes gradient stops in the shape's own coordinate space, so the
 // angle is resolved against the layer box here.
+// Lettering laid over dark art is unreadable without an outline. SFX
+// always had one; every text layer can now take one.
+function outlineProps(layer) {
+  const width = layer.props.outlineWidth || 0;
+  // Konva defaults strokeWidth to 2, so "no outline" must be stated
+  // rather than omitted, or a stroke colour set elsewhere would show.
+  if (!width) return { strokeWidth: 0 };
+  return {
+    stroke: layer.props.outline || "#ffffff",
+    strokeWidth: width,
+    fillAfterStrokeEnabled: true,
+    lineJoin: "round",
+  };
+}
+
 function fillProps(layer) {
   if (layer.props.fillType !== "linear") return { fill: layer.props.fill };
   const angle = ((layer.props.gradientAngle || 0) * Math.PI) / 180;
@@ -683,13 +698,17 @@ function buildNode(layer) {
     node = new Konva.Label(common);
     node.add(new Konva.Tag({
       fill: layer.props.bg || "#fff", stroke: layer.props.ink || "#111",
-      strokeWidth: 2.5, cornerRadius: 18,
-      pointerDirection: "down", pointerWidth: 22, pointerHeight: 26,
+      strokeWidth: 2.5, cornerRadius: layer.props.shape === "thought" ? 26 : 18,
+      // the tail is what tells the reader who is speaking
+      pointerDirection: layer.props.tail || "down",
+      pointerWidth: layer.props.tailWidth || 22,
+      pointerHeight: layer.props.tailLength || 26,
     }));
     node.add(new Konva.Text({
       text: layer.props.text, fontFamily: fontOf(layer), fontStyle: "600",
       fontSize: layer.props.fontSize, fill: layer.props.color || "#111", padding: 13,
       width: layer.w, align: "center", wrap: "word", name: "label-text",
+      ...outlineProps(layer),
       lineHeight: layer.props.lineHeight || 1.15,
       letterSpacing: layer.props.letterSpacing || 0,
     }));
@@ -699,6 +718,7 @@ function buildNode(layer) {
       text: layer.props.text, fontFamily: fontOf(layer), fontSize: layer.props.fontSize,
       fill: layer.props.color || "#111", padding: 9, width: layer.w, name: "label-text",
       align: layer.props.align || "left",
+      ...outlineProps(layer),
       lineHeight: layer.props.lineHeight || 1.15,
       letterSpacing: layer.props.letterSpacing || 0,
     });
@@ -714,6 +734,7 @@ function buildNode(layer) {
       fontStyle: layer.props.style || "700",
       fontSize: layer.props.fontSize, fill: layer.props.fill, width: layer.w,
       align: layer.props.align || "left", name: "label-text",
+      ...outlineProps(layer),
       lineHeight: layer.props.lineHeight || 1.15,
       letterSpacing: layer.props.letterSpacing || 0,
     }));
@@ -1677,6 +1698,13 @@ function renderProps() {
     html += propField("Line height", `<input data-k="lineHeight" type="number" step="0.05" value="${layer.props.lineHeight || 1.15}">`);
     html += propField("Letter space", `<input data-k="letterSpacing" type="number" value="${layer.props.letterSpacing || 0}">`);
   }
+  if (layer.type === "balloon") {
+    html += propField("Tail", `<select data-k="tail">${
+      ["down", "up", "left", "right", "none"].map((d) =>
+        `<option value="${d}" ${(layer.props.tail || "down") === d ? "selected" : ""}>${d}</option>`).join("")
+    }</select>`);
+    html += propField("Tail length", `<input data-k="tailLength" type="number" value="${layer.props.tailLength || 26}">`);
+  }
   if (["balloon", "caption"].includes(layer.type)) {
     html += propField("Fill", `<input data-k="bg" type="color" value="${layer.props.bg || (layer.type === "balloon" ? "#ffffff" : "#fdf6de")}">`);
     html += propField("Text color", `<input data-k="color" type="color" value="${layer.props.color || "#111111"}">`);
@@ -1689,6 +1717,9 @@ function renderProps() {
   if (layer.type === "sfx") {
     html += propField("Outline", `<input data-k="stroke" type="color" value="${layer.props.stroke}">`);
     html += propField("Outline px", `<input data-k="strokeWidth" type="number" value="${layer.props.strokeWidth}">`);
+  } else if (TEXT_TYPES.includes(layer.type)) {
+    html += propField("Outline", `<input data-k="outline" type="color" value="${layer.props.outline || "#ffffff"}">`);
+    html += propField("Outline px", `<input data-k="outlineWidth" type="number" value="${layer.props.outlineWidth || 0}">`);
   }
   if (ROTATABLE.includes(layer.type)) {
     html += propField("Rotation", `<input data-k="rot" type="number" value="${layer.props.rot || 0}">`);
@@ -1744,7 +1775,8 @@ function renderProps() {
       else if (key === "text") layer.props.text = input.value;
       else if (key === "fontSize") layer.props.fontSize = parseInt(input.value, 10) || 16;
       else if (key === "lineHeight") layer.props.lineHeight = parseFloat(input.value) || 1.15;
-      else if (["strokeWidth", "rot", "radius", "letterSpacing", "gradientAngle"].includes(key)) layer.props[key] = parseInt(input.value, 10) || 0;
+      else if (["strokeWidth", "rot", "radius", "letterSpacing", "gradientAngle",
+                "outlineWidth", "tailLength"].includes(key)) layer.props[key] = parseInt(input.value, 10) || 0;
       else layer.props[key] = input.value;
       renderCanvas();
       select(layer.id);

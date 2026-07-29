@@ -262,6 +262,30 @@ check("comic page still lays out panels", async () => {
 check("building each kind never destroyed earlier pages", () =>
   doc.pages.filter(p => p.layers.length).length >= 4);
 
+// lettering
+check("balloon tail direction is settable", () => {
+  const layer = addLayer("balloon", { x: 30, y: 30 });
+  layer.props.tail = "left";
+  layer.props.tailLength = 40;
+  renderCanvas();
+  const tag = nodes.get(layer.id).findOne("Tag");
+  return tag.pointerDirection() === "left" && tag.pointerHeight() === 40;
+});
+check("captions can carry an outline", () => {
+  const layer = addLayer("caption", { x: 30, y: 120 });
+  layer.props.outline = "#ffffff";
+  layer.props.outlineWidth = 4;
+  renderCanvas();
+  const text = nodes.get(layer.id).findOne(".label-text");
+  return text.strokeWidth() === 4 && text.fillAfterStrokeEnabled() === true;
+});
+check("no outline means no stroke", () => {
+  const layer = addLayer("text", { x: 30, y: 200 });
+  renderCanvas();
+  const text = nodes.get(layer.id).findOne(".label-text");
+  return !text.strokeWidth();
+});
+
 // rulers and guides
 check("rulers render page coordinates", () => {
   document.body.classList.add("rulers-on");
