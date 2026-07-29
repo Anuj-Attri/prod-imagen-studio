@@ -48,6 +48,8 @@ def keys() -> dict:
         "openai": data.get("openai") or os.environ.get("OPENAI_API_KEY"),
         "bfl": data.get("bfl") or os.environ.get("BFL_API_KEY"),
         "anthropic": data.get("anthropic") or os.environ.get("ANTHROPIC_API_KEY"),
+        "llm_url": data.get("llm_url"),
+        "llm_model": data.get("llm_model"),
     }
 
 
@@ -136,6 +138,69 @@ def generate_bfl(prompt: str, seed: int, api_key: str) -> bytes:
     raise TimeoutError("FLUX API polling timed out")
 
 
+
+# ------------------------------------------------------------ llm backends --
+# Priority: local OpenAI-compatible endpoint (Ollama, vLLM, LM Studio,
+# llama.cpp server) with an open model, then Anthropic if a key exists.
+import time as _time
+_llm_probe = {"at": 0.0, "ok": False}
+
+
+def llm_config(current: dict) -> dict:
+    return {
+        "url": (current.get("llm_url") or os.environ.get("LLM_BASE_URL")
+                or "http://127.0.0.1:11434/v1").rstrip("/"),
+        "model": current.get("llm_model") or os.environ.get("LLM_MODEL") or "qwen3:8b",
+    }
+
+
+def local_llm_reachable(current: dict) -> bool:
+    now = _time.time()
+    if now - _llm_probe["at"] < 30:
+        return _llm_probe["ok"]
+    _llm_probe["at"] = now
+    try:
+        cfg = llm_config(current)
+        req = urllib.request.Request(cfg["url"] + "/models")
+        with urllib.request.urlopen(req, timeout=2) as r:
+            _llm_probe["ok"] = r.status == 200
+    except Exception:
+        _llm_probe["ok"] = False
+    return _llm_probe["ok"]
+
+
+def llm_chat(current: dict, system: str, messages: list, max_tokens: int = 900) -> str:
+    if local_llm_reachable(current):
+        cfg = llm_config(current)
+        result = http_json(
+            cfg["url"] + "/chat/completions",
+            {
+                "model": cfg["model"],
+                "max_tokens": max_tokens,
+                "messages": [{"role": "system", "content": system}] + messages,
+            },
+            {}, timeout=180,
+        )
+        return result["choices"][0]["message"]["content"].strip()
+    if current.get("anthropic"):
+        result = http_json(
+            "https://api.anthropic.com/v1/messages",
+            {
+                "model": os.environ.get("STORY_MODEL", "claude-sonnet-5"),
+                "max_tokens": max_tokens,
+                "system": system,
+                "messages": messages,
+            },
+            {"x-api-key": current["anthropic"], "anthropic-version": "2023-06-01"},
+            timeout=120,
+        )
+        return "".join(b.get("text", "") for b in result.get("content", [])).strip()
+    raise RuntimeError(
+        "No language backend. Run a local model (Ollama: 'ollama pull qwen3:8b', "
+        "or vLLM) or add an Anthropic key in Settings."
+    )
+
+
 # ------------------------------------------------------------- story engine --
 STORY_SYSTEM = (
     "You are the continuity editor for a visual story project. Given the "
@@ -149,7 +214,7 @@ STORY_SYSTEM = (
 )
 
 
-def analyze_story(payload: dict, api_key: str) -> dict:
+def analyze_story(payload: dict, current: dict) -> dict:
     content = json.dumps({
         "project": payload.get("project"),
         "kind": payload.get("kind"),
@@ -167,7 +232,6 @@ def analyze_story(payload: dict, api_key: str) -> dict:
         {"x-api-key": api_key, "anthropic-version": "2023-06-01"},
         timeout=120,
     )
-    text = "".join(block.get("text", "") for block in result.get("content", [])).strip()
     if text.startswith("```"):
         text = text.strip("`").lstrip("json").strip()
     parsed = json.loads(text)
@@ -196,7 +260,7 @@ AGENT_SYSTEM = (
 )
 
 
-def agent_chat(payload: dict, api_key: str) -> str:
+def agent_chat(payload: dict, current: dict) -> str:
     context = json.dumps({
         "project": payload.get("project"),
         "kind": payload.get("kind"),
@@ -207,18 +271,8 @@ def agent_chat(payload: dict, api_key: str) -> str:
         for m in payload.get("messages", [])
         if m.get("role") in ("user", "assistant")
     ] or [{"role": "user", "content": "hello"}]
-    result = http_json(
-        "https://api.anthropic.com/v1/messages",
-        {
-            "model": os.environ.get("STORY_MODEL", "claude-sonnet-5"),
-            "max_tokens": 700,
-            "system": AGENT_SYSTEM + " Current project context: " + context,
-            "messages": messages,
-        },
-        {"x-api-key": api_key, "anthropic-version": "2023-06-01"},
-        timeout=120,
-    )
-    return "".join(block.get("text", "") for block in result.get("content", [])).strip()
+    return llm_chat(current, AGENT_SYSTEM + " Current project context: " + context,
+                    messages, max_tokens=700)
 
 
 # -------------------------------------------------------------------- server --
@@ -261,7 +315,7 @@ class Handler(BaseHTTPRequestHandler):
                 "auth": bool(AUTH_TOKEN),
                 "local": local_available(),
                 "apis": any([current["ideogram"], current["openai"], current["bfl"]]),
-                "story": bool(current["anthropic"]),
+                "story": bool(current["anthropic"]) or local_llm_reachable(current),
             })
             return
         if not self._authorized():
@@ -340,11 +394,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _story(self, payload: dict) -> None:
         current = keys()
-        if not current["anthropic"]:
-            self._json(500, {"error": "Story engine needs an Anthropic key"})
-            return
         try:
-            result = analyze_story(payload, current["anthropic"])
+            result = analyze_story(payload, current)
             self._json(200, {"ok": True, **result})
         except Exception as error:
             self._json(500, {"error": f"{type(error).__name__}: {error}"})

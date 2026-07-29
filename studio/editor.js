@@ -809,6 +809,8 @@ document.getElementById("settings-btn").onclick = async () => {
   document.getElementById("key-ideogram").value = saved.ideogram || "";
   document.getElementById("key-openai").value = saved.openai || "";
   document.getElementById("key-bfl").value = saved.bfl || "";
+  document.getElementById("key-llm-url").value = saved.llm_url || "";
+  document.getElementById("key-llm-model").value = saved.llm_model || "";
   settingsModal.style.display = "grid";
 };
 document.getElementById("settings-cancel").onclick = () => { settingsModal.style.display = "none"; };
@@ -818,6 +820,8 @@ document.getElementById("settings-save").onclick = async () => {
     ideogram: document.getElementById("key-ideogram").value.trim(),
     openai: document.getElementById("key-openai").value.trim(),
     bfl: document.getElementById("key-bfl").value.trim(),
+    llm_url: document.getElementById("key-llm-url").value.trim(),
+    llm_model: document.getElementById("key-llm-model").value.trim(),
   });
   settingsModal.style.display = "none";
   toast("Saved. Engines refresh in a few seconds.");
