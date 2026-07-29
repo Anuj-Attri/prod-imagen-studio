@@ -511,10 +511,14 @@ LAYOUT_DIRECTIVES = {
         "as a tagline or a date. Use kind text for all of them."
     ),
     "card": (
-        "This project is a greeting card front. Return exactly ONE panel "
-        "describing a charming, uncluttered illustration. The dialogue "
-        "list is the lettering: first entry is the greeting itself, "
-        "optionally one short line underneath. Use kind text."
+        "This project is a greeting card, which has a front and an "
+        "inside. Return exactly ONE panel describing a charming, "
+        "uncluttered illustration for the front. The dialogue list is "
+        "the lettering, all of kind text, in this order: the greeting "
+        "that goes on the front, then the message written inside, which "
+        "may be a sentence or two, then optionally a sign off such as a "
+        "name or a wish. The front stays short; the inside carries the "
+        "words."
     ),
     "blueprint": (
         "This project is a systems diagram. Do NOT return panels and do "

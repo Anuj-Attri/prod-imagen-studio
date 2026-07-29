@@ -67,9 +67,11 @@ The agent returns the headline and any secondary lines as real text
 layers, so edit them directly on the canvas: font, size, colour and
 outline are all in Properties.
 
-**A greeting card.** The artwork takes the upper two thirds and the
-greeting sits below it. Change the paper colour in the Style tab if the
-card wants a background other than white.
+**A greeting card.** A card is folded, so it is built as two pages: the
+front carries the artwork with the greeting under it, and the inside
+carries the message and a sign off. The front is what stays on screen
+when it is built. Change the paper colour in the Style tab if the card
+wants a background other than white.
 
 **A systems blueprint.** No image is generated at all. The agent returns
 the components and how they connect, and the application draws them as

@@ -956,6 +956,27 @@ check("card: greeting sits below a shorter artwork", async () => {
   const greeting = currentPage().layers.find(l => l.type === "text");
   return art.h < PAGE.h && greeting.y >= art.h;
 });
+check("a card is folded: the message goes inside", async () => {
+  doc.kind = "card";
+  doc.style.preset = "card";
+  await applyAgentArtwork([{
+    prompt: "1girl, witch, pumpkin, full moon",
+    dialogue: [
+      { kind: "text", text: "Happy Halloween!" },
+      { kind: "text", text: "Wishing you a night of excellent trouble." },
+      { kind: "text", text: "love, R" },
+    ],
+  }], "card");
+  const inside = doc.pages.find((p) => p.name === "Inside");
+  if (!inside) return "no inside page";
+  const words = inside.layers.map((l) => l.props.text);
+  const front = doc.pages[pageIndex];
+  return words.includes("Wishing you a night of excellent trouble.")
+    && words.includes("love, R")
+    // the front keeps the greeting alone, and is what stays on screen
+    && front.layers.some((l) => l.props.text === "Happy Halloween!")
+    && !front.layers.some((l) => l.props.text === "love, R");
+});
 check("coloring: one artwork, one caption", async () => {
   doc.kind = "coloring";
   doc.style.preset = "coloring";

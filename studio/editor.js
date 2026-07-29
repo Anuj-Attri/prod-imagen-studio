@@ -2960,6 +2960,8 @@ async function applyAgentArtwork(beats, layout) {
   placeArtworkText(layout, lines, artBox);
   select(null);
   renderCanvas();
+  // A card is folded: the front is only half of it.
+  if (layout === "card") buildCardInside(lines.slice(1));
 
   if (!engineReady()) {
     showNoEngine(true);
@@ -2994,6 +2996,39 @@ async function applyAgentArtwork(beats, layout) {
   }
 }
 
+// A greeting card is folded, so the message belongs on a second page.
+// Building only the front leaves the object half made.
+function buildCardInside(lines) {
+  if (!lines.length) return;
+  const front = pageIndex;
+  addPage(false);
+  currentPage().name = "Inside";
+  const message = addLayer("text", {
+    x: Math.round(PAGE.w * 0.12), y: Math.round(PAGE.h * 0.3),
+    w: Math.round(PAGE.w * 0.76),
+  });
+  message.name = "Message";
+  message.props.text = lines[0].text;
+  message.props.fontSize = Math.round(PAGE.w * 0.038);
+  message.props.align = "center";
+  message.props.font = "Georgia";
+  message.props.lineHeight = 1.6;
+  if (lines[1]) {
+    const signoff = addLayer("text", {
+      x: Math.round(PAGE.w * 0.12), y: Math.round(PAGE.h * 0.66),
+      w: Math.round(PAGE.w * 0.76),
+    });
+    signoff.name = "Sign off";
+    signoff.props.text = lines[1].text;
+    signoff.props.fontSize = Math.round(PAGE.w * 0.03);
+    signoff.props.align = "center";
+    signoff.props.font = "Georgia";
+  }
+  select(null);
+  renderCanvas();
+  goToPage(front);        // leave the front showing, as it would be seen
+}
+
 // Titles, greetings and labels sit differently on each kind of document.
 function placeArtworkText(layout, lines, artBox) {
   if (!lines.length) return;
@@ -3018,17 +3053,12 @@ function placeArtworkText(layout, lines, artBox) {
     return;
   }
   if (layout === "card") {
-    const [greeting, ...rest] = lines;
+    // the front carries the greeting only; the words go inside
+    const [greeting] = lines;
     add("text", greeting.text, {
       x: Math.round(PAGE.w * 0.08), y: artBox.h + Math.round(PAGE.h * 0.05),
       w: Math.round(PAGE.w * 0.84),
     }, { fontSize: Math.round(PAGE.w * 0.075), fill: "#111111", align: "center", font: "Georgia" });
-    rest.slice(0, 1).forEach((line) => {
-      add("text", line.text, {
-        x: Math.round(PAGE.w * 0.08), y: artBox.h + Math.round(PAGE.h * 0.19),
-        w: Math.round(PAGE.w * 0.84),
-      }, { fontSize: Math.round(PAGE.w * 0.03), fill: "#444444", align: "center" });
-    });
     return;
   }
   if (layout === "blueprint") {
