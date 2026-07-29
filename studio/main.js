@@ -5,85 +5,64 @@ const fs = require("fs");
 let launcherWindow = null;
 let editorWindow = null;
 
+const frameless = {
+  frame: false,
+  backgroundColor: "#0b0a0e",
+  webPreferences: {
+    preload: path.join(__dirname, "preload.js"),
+    nodeIntegration: false,
+    contextIsolation: true,
+  },
+};
+
 function createLauncher() {
-  launcherWindow = new BrowserWindow({
-    width: 980,
-    height: 640,
-    resizable: false,
-    backgroundColor: "#141417",
-    title: "prod-imagen studio",
-    webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
-      nodeIntegration: false,
-      contextIsolation: true,
-    },
-  });
-  launcherWindow.setMenuBarVisibility(false);
+  launcherWindow = new BrowserWindow({ width: 980, height: 640, resizable: false, ...frameless });
   launcherWindow.loadFile(path.join(__dirname, "launcher.html"));
 }
 
 function createEditor(project) {
-  editorWindow = new BrowserWindow({
-    width: 1600,
-    height: 1000,
-    minWidth: 1180,
-    minHeight: 720,
-    backgroundColor: "#141417",
-    title: `${project.name} — prod-imagen studio`,
-    webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
-      nodeIntegration: false,
-      contextIsolation: true,
-    },
-  });
-  editorWindow.setMenuBarVisibility(false);
+  editorWindow = new BrowserWindow({ width: 1600, height: 1000, minWidth: 1180, minHeight: 720, ...frameless });
   editorWindow.loadFile(path.join(__dirname, "editor.html"), {
-    query: { project: encodeURIComponent(JSON.stringify(project)) },
+    query: { project: JSON.stringify(project) },
   });
-  if (launcherWindow) {
-    launcherWindow.close();
-    launcherWindow = null;
-  }
+  if (launcherWindow) { launcherWindow.close(); launcherWindow = null; }
 }
 
-ipcMain.handle("open-project", (_event, project) => {
-  createEditor(project);
-  return true;
+ipcMain.handle("open-project", (_e, project) => { createEditor(project); return true; });
+ipcMain.on("win", (event, action) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return;
+  if (action === "min") win.minimize();
+  else if (action === "max") win.isMaximized() ? win.unmaximize() : win.maximize();
+  else if (action === "close") win.close();
 });
 
-ipcMain.handle("save-project-dialog", async (_event, suggestedName) => {
+ipcMain.handle("save-project-dialog", async (_e, suggestedName) => {
   const result = await dialog.showSaveDialog({
     defaultPath: suggestedName,
     filters: [{ name: "prod-imagen project", extensions: ["dimg"] }],
   });
   return result.canceled ? null : result.filePath;
 });
-
-ipcMain.handle("write-file", async (_event, filePath, contents) => {
+ipcMain.handle("write-file", async (_e, filePath, contents) => {
   fs.writeFileSync(filePath, contents, "utf-8");
   return true;
 });
-
 ipcMain.handle("read-file-dialog", async () => {
   const result = await dialog.showOpenDialog({
     filters: [{ name: "prod-imagen project", extensions: ["dimg"] }],
     properties: ["openFile"],
   });
   if (result.canceled || !result.filePaths.length) return null;
-  return {
-    path: result.filePaths[0],
-    contents: fs.readFileSync(result.filePaths[0], "utf-8"),
-  };
+  return { path: result.filePaths[0], contents: fs.readFileSync(result.filePaths[0], "utf-8") };
 });
-
-ipcMain.handle("export-png-dialog", async (_event, suggestedName, dataUrl) => {
+ipcMain.handle("export-png-dialog", async (_e, suggestedName, dataUrl) => {
   const result = await dialog.showSaveDialog({
     defaultPath: suggestedName,
     filters: [{ name: "PNG image", extensions: ["png"] }],
   });
   if (result.canceled) return null;
-  const base64 = dataUrl.replace(/^data:image\/png;base64,/, "");
-  fs.writeFileSync(result.filePath, Buffer.from(base64, "base64"));
+  fs.writeFileSync(result.filePath, Buffer.from(dataUrl.replace(/^data:image\/png;base64,/, ""), "base64"));
   return result.filePath;
 });
 

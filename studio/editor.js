@@ -749,6 +749,64 @@ function setEngineDot(id, ok) {
   document.getElementById(id).classList.toggle("ok", Boolean(ok));
 }
 
+
+// ------------------------------------------------- window / theme / chat --
+document.getElementById("win-min").onclick = () => window.studio.win("min");
+document.getElementById("win-max").onclick = () => window.studio.win("max");
+document.getElementById("win-close").onclick = () => window.studio.win("close");
+
+const savedTheme = localStorage.getItem("studio-theme");
+if (savedTheme) document.documentElement.dataset.theme = savedTheme;
+document.getElementById("theme-toggle").onclick = () => {
+  const next = document.documentElement.dataset.theme === "light" ? "" : "light";
+  if (next) document.documentElement.dataset.theme = next;
+  else delete document.documentElement.dataset.theme;
+  localStorage.setItem("studio-theme", next);
+};
+
+const chatHistory = [];
+async function sendChat() {
+  const input = document.getElementById("chat-input");
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  appendMsg("user", text);
+  chatHistory.push({ role: "user", content: text });
+  const thinking = appendMsg("agent", "…");
+  try {
+    const pages = doc.pages.map((page, index) => ({
+      index: index + 1,
+      panels: page.layers.filter((l) => l.type === "panel").map((l) => l.props.prompt || ""),
+      dialogue: page.layers.filter((l) => ["balloon", "caption", "text", "sfx"].includes(l.type))
+        .map((l) => l.props.text || ""),
+    }));
+    const response = await fetch(`${SERVER}/agent/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: chatHistory.slice(-16), project: doc.name, kind: doc.kind, pages }),
+    });
+    const result = await response.json();
+    if (!result.ok) throw new Error(result.error || "agent unavailable");
+    thinking.textContent = result.reply;
+    chatHistory.push({ role: "assistant", content: result.reply });
+  } catch (error) {
+    thinking.textContent = "Yoru is offline: " + error.message;
+  }
+}
+function appendMsg(kind, text) {
+  const log = document.getElementById("chat-log");
+  const el = document.createElement("div");
+  el.className = "msg " + kind;
+  el.textContent = text;
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+  return el;
+}
+document.getElementById("chat-send").onclick = sendChat;
+document.getElementById("chat-input").addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendChat(); }
+});
+
 // ------------------------------------------------------------------ init --
 document.getElementById("project-title").textContent = doc.name;
 document.getElementById("project-kind").textContent = `${doc.kind} project`;

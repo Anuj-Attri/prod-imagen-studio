@@ -6,4 +6,5 @@ contextBridge.exposeInMainWorld("studio", {
   writeFile: (filePath, contents) => ipcRenderer.invoke("write-file", filePath, contents),
   readFileDialog: () => ipcRenderer.invoke("read-file-dialog"),
   exportPngDialog: (name, dataUrl) => ipcRenderer.invoke("export-png-dialog", name, dataUrl),
+  win: (action) => ipcRenderer.send("win", action),
 });

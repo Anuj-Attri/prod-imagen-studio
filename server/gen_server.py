@@ -185,6 +185,42 @@ def analyze_story(payload: dict, api_key: str) -> dict:
     }
 
 
+
+AGENT_SYSTEM = (
+    "You are Yoru, the in-app copilot of prod-imagen studio, a canvas tool "
+    "for manga, anime, and illustration projects. You receive the user's "
+    "pages (panel prompts and dialogue) as context. Help with: panel prompt "
+    "writing, dialogue and lettering, page composition and pacing, story "
+    "beats, style direction. Be concise and concrete; suggest exact prompt "
+    "text the user can paste. Plain text only, no markdown."
+)
+
+
+def agent_chat(payload: dict, api_key: str) -> str:
+    context = json.dumps({
+        "project": payload.get("project"),
+        "kind": payload.get("kind"),
+        "pages": payload.get("pages", []),
+    })
+    messages = [
+        {"role": m.get("role", "user"), "content": str(m.get("content", ""))}
+        for m in payload.get("messages", [])
+        if m.get("role") in ("user", "assistant")
+    ] or [{"role": "user", "content": "hello"}]
+    result = http_json(
+        "https://api.anthropic.com/v1/messages",
+        {
+            "model": os.environ.get("STORY_MODEL", "claude-sonnet-5"),
+            "max_tokens": 700,
+            "system": AGENT_SYSTEM + " Current project context: " + context,
+            "messages": messages,
+        },
+        {"x-api-key": api_key, "anthropic-version": "2023-06-01"},
+        timeout=120,
+    )
+    return "".join(block.get("text", "") for block in result.get("content", [])).strip()
+
+
 # -------------------------------------------------------------------- server --
 def engine_table(current: dict) -> list:
     table = [
@@ -250,6 +286,8 @@ class Handler(BaseHTTPRequestHandler):
             self._generate(payload)
         elif self.path == "/story/analyze":
             self._story(payload)
+        elif self.path == "/agent/chat":
+            self._chat(payload)
         else:
             self._json(404, {"error": "unknown endpoint"})
 
@@ -287,6 +325,16 @@ class Handler(BaseHTTPRequestHandler):
                 "latency_ms": round((time.perf_counter() - started) * 1000),
                 "image_base64": base64.b64encode(image).decode(),
             })
+        except Exception as error:
+            self._json(500, {"error": f"{type(error).__name__}: {error}"})
+
+    def _chat(self, payload: dict) -> None:
+        current = keys()
+        if not current["anthropic"]:
+            self._json(500, {"error": "Yoru needs an Anthropic key"})
+            return
+        try:
+            self._json(200, {"ok": True, "reply": agent_chat(payload, current["anthropic"])})
         except Exception as error:
             self._json(500, {"error": f"{type(error).__name__}: {error}"})
 
