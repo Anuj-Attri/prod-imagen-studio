@@ -1429,15 +1429,27 @@ function engineReady() {
   return Boolean(select_.value && option && !option.disabled && select_.value !== "server offline");
 }
 
+// Ask the engine for art shaped like the panel it fills, at roughly the
+// one-megapixel budget diffusion models are trained on.
+function renderSize(layer) {
+  const ratio = Math.min(2.2, Math.max(0.45, (layer.w || 1) / (layer.h || 1)));
+  const round64 = (v) => Math.max(512, Math.min(1536, Math.round(v / 64) * 64));
+  return {
+    width: round64(Math.sqrt(1024 * 1024 * ratio)),
+    height: round64(Math.sqrt((1024 * 1024) / ratio)),
+  };
+}
+
 async function generatePanel(layer) {
   if (!engineReady()) throw new Error("no image engine configured");
+  const size = renderSize(layer);
   const response = await fetch(`${SERVER}/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       engine: document.getElementById("engine").value,
       prompt: layer.props.prompt, seed: layer.props.seed,
-      width: 1024, height: 1024, no_text: true,
+      width: size.width, height: size.height, no_text: true, style: doc.kind,
     }),
   });
   const result = await response.json();

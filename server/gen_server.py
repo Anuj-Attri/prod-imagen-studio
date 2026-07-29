@@ -78,6 +78,14 @@ def http_get_bytes(url: str, timeout: int = 300) -> bytes:
 # build of torch (see .venv-image); otherwise it stays unavailable and
 # the hosted engines are used instead.
 GPU_MODEL = os.environ.get("LOCAL_IMAGE_MODEL", "cagliostrolab/animagine-xl-4.0")
+# Anime SDXL checkpoints are tag-driven and expect a trailing quality
+# block; without it the same prompt renders flat and often loses the
+# subject entirely.
+GPU_STYLE_TAGS = {
+    "manga": "monochrome, greyscale, manga, screentone, sharp linework",
+    "anime": "anime screencap style, vibrant colors",
+}
+GPU_QUALITY_TAGS = "masterpiece, best quality, very aesthetic, absurdres"
 GPU_NEGATIVE = os.environ.get(
     "LOCAL_IMAGE_NEGATIVE",
     "lowres, worst quality, low quality, bad anatomy, bad hands, extra digits, "
@@ -86,6 +94,10 @@ GPU_NEGATIVE = os.environ.get(
 )
 _gpu_pipe = None
 _gpu_lock = threading.Lock()
+# A diffusers pipeline is NOT thread safe: concurrent calls share the
+# scheduler's step state and blow up with an out-of-range sigma index.
+# The server is threaded, so generation is serialized here.
+_gpu_run_lock = threading.Lock()
 _gpu_state = {"loading": False, "error": None}
 
 
@@ -129,7 +141,7 @@ def gpu_pipeline():
                 pipe = pipe.to("cuda")
                 pipe.set_progress_bar_config(disable=True)
                 # keeps peak VRAM well inside a 16 GB card at 1024 px
-                pipe.enable_vae_tiling()
+                pipe.vae.enable_tiling()
                 if pipe.dtype != torch.float16:
                     raise RuntimeError(f"expected fp16 pipeline, got {pipe.dtype}")
                 _gpu_pipe = pipe
@@ -142,19 +154,34 @@ def gpu_pipeline():
         return _gpu_pipe
 
 
+def snap64(value: int, lo: int = 512, hi: int = 1536) -> int:
+    # SDXL latents require multiples of 8; 64 keeps composition sane too
+    return max(lo, min(hi, round(value / 64) * 64))
+
+
+def gpu_prompt(prompt: str, style: str) -> str:
+    parts = [prompt.rstrip(" ,")]
+    tags = GPU_STYLE_TAGS.get(style)
+    if tags:
+        parts.append(tags)
+    parts.append(GPU_QUALITY_TAGS)
+    return ", ".join(parts)
+
+
 def generate_gpu(prompt: str, seed: int, width: int, height: int) -> bytes:
     import io
     import torch
     pipe = gpu_pipeline()
-    generator = torch.Generator("cuda").manual_seed(seed)
-    image = pipe(
-        prompt=prompt,
-        negative_prompt=GPU_NEGATIVE,
-        width=width, height=height,
-        num_inference_steps=int(os.environ.get("LOCAL_IMAGE_STEPS", "28")),
-        guidance_scale=float(os.environ.get("LOCAL_IMAGE_CFG", "5.0")),
-        generator=generator,
-    ).images[0]
+    with _gpu_run_lock:  # one generation at a time: the pipeline is stateful
+        generator = torch.Generator("cuda").manual_seed(seed)
+        image = pipe(
+            prompt=prompt,
+            negative_prompt=GPU_NEGATIVE,
+            width=snap64(width), height=snap64(height),
+            num_inference_steps=int(os.environ.get("LOCAL_IMAGE_STEPS", "28")),
+            guidance_scale=float(os.environ.get("LOCAL_IMAGE_CFG", "5.0")),
+            generator=generator,
+        ).images[0]
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     return buffer.getvalue()
@@ -442,6 +469,17 @@ AGENT_SYSTEM = (
     "The application places every panel on the page for you: never "
     "output coordinates, sizes, panel numbers or layout instructions. "
     "Panel order is reading order. "
+    "PROMPT STYLE IS CRITICAL. The art model is tag-driven, not prose. "
+    "Write each prompt as 8 to 18 comma-separated danbooru style tags, "
+    "never sentences. Start with the subject count tag (1girl, 1boy, "
+    "2boys, 1girl 1boy, no humans), then appearance, then clothing, "
+    "then pose or action, then setting, then camera framing tags such "
+    "as close-up, upper body, full body, from below, from above, dutch "
+    "angle, wide shot, then lighting and mood tags. Example of the "
+    "required style: 2boys, ninja, black bodysuit, katana, fighting "
+    "stance, rooftop, night, rain, from below, dutch angle, dramatic "
+    "shadows. Keep a recurring character's appearance tags identical in "
+    "every panel so the character stays consistent. "
     "Each prompt describes ONLY what the art shows and must never ask "
     "for lettering, captions, speech balloons or any written words in "
     "the image; the words go in the dialogue list, which the app draws "
@@ -628,7 +666,12 @@ class Handler(BaseHTTPRequestHandler):
         if not prompt:
             self._json(400, {"error": "prompt is required"})
             return
-        if payload.get("no_text"):
+        style = str(payload.get("style", ""))
+        if engine == "local-gpu":
+            # tag-driven checkpoint: the negative prompt already bars
+            # lettering, so the prose no-text clause would only dilute it
+            prompt = gpu_prompt(prompt, style)
+        elif payload.get("no_text"):
             prompt = prompt + NO_TEXT_SUFFIX
         seed = payload.get("seed")
         seed = int(seed) if seed is not None else int(time.time() * 997) % 2_000_000

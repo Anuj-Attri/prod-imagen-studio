@@ -9,9 +9,13 @@ Rules for any coding agent working on this repository.
   picker), `editor.html` + `editor.js` (canvas editor: Konva stage,
   layers model, dock panels, agent chat).
 - `server/gen_server.py`: stdlib-only Python HTTP server, port 8787.
-  Image engines: Ideogram / OpenAI / FLUX (key-gated) plus optional
-  local dev engine. Language backend for agent + story: local
-  OpenAI-compatible endpoint first (Ollama/vLLM), Anthropic fallback.
+  Image engines: local GPU (diffusers, free) plus Ideogram / OpenAI /
+  FLUX (key-gated) and an optional local dev engine. Language backend
+  for agent + story: local OpenAI-compatible endpoint first
+  (Ollama/vLLM), Anthropic fallback. `/health` reports `build`.
+- `.venv-image/`: CUDA interpreter for the local GPU engine. The
+  launcher prefers it so `torch.cuda` is visible to the server. It is
+  gitignored; contributors without a GPU simply do not get that engine.
 - Privacy first: everything runs locally by default. No telemetry.
   Keys and chats never leave the machine except to call a provider the
   user explicitly configured.
@@ -25,6 +29,17 @@ Rules for any coding agent working on this repository.
 - The Transformer must share the container of the nodes it transforms.
 - All lettering is vector text on the canvas. Never rely on a model to
   render text.
+- Panel geometry belongs to `pageLayout()` in editor.js, never to the
+  language model: models have no spatial sense and produce overlapping
+  pages. The model returns beats (prompt + dialogue) only.
+- Art prompts for anime/manga checkpoints must be comma-separated
+  danbooru tags, not prose. Prose loses the subject entirely. The
+  agent system prompt enforces this and the server appends the style
+  and quality tag block per project kind.
+- A diffusers pipeline is not thread safe; generation is serialized
+  behind `_gpu_run_lock`. Concurrent calls corrupt scheduler state.
+- Never leave a stale server on 8787: it silently serves old code.
+  Check `build` on `/health` when behaviour does not match the source.
 - No emoji in UI copy or code. No long dashes in copy. Accent color is
   used sparingly: focus, active-tab underline, primary button border.
 - Never commit secrets. `server/keys.json` is gitignored; CI fails on
