@@ -150,6 +150,29 @@ check("line height reaches the text node", () => {
   return nodes.get(layer.id).findOne(".label-text").lineHeight() === 1.8;
 });
 
+check("gradient fill reaches the shape", () => {
+  const layer = addLayer("rect", { x: 10, y: 600, w: 120, h: 80 });
+  layer.props.fillType = "linear";
+  layer.props.fill = "#ff0000";
+  layer.props.fill2 = "#0000ff";
+  layer.props.gradientAngle = 90;
+  renderCanvas();
+  const shape = nodes.get(layer.id).findOne(".shape");
+  const stops = shape.fillLinearGradientColorStops();
+  const start = shape.fillLinearGradientStartPoint();
+  const end = shape.fillLinearGradientEndPoint();
+  if (!stops || stops[1] !== "#ff0000" || stops[3] !== "#0000ff") return "stops";
+  // 90 degrees runs top to bottom, so x stays put and y spans the box
+  return Math.abs(start.x - end.x) < 1 && Math.abs(end.y - start.y) > 40;
+});
+check("solid fill stays solid", () => {
+  const layer = addLayer("rect", { x: 150, y: 600, w: 60, h: 60 });
+  layer.props.fill = "#00ff00";
+  renderCanvas();
+  const shape = nodes.get(layer.id).findOne(".shape");
+  return shape.fill() === "#00ff00" && !shape.fillLinearGradientColorStops();
+});
+
 // blueprint: exact vector diagram, not generated art
 check("blueprint builds boxes and connectors", () => {
   buildBlueprint(

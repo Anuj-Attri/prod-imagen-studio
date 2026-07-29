@@ -583,6 +583,31 @@ function toWorld(pointer) {
 }
 
 // ------------------------------------------------------------ rendering --
+// A flat colour is not enough for poster and card backgrounds. Konva
+// takes gradient stops in the shape's own coordinate space, so the
+// angle is resolved against the layer box here.
+function fillProps(layer) {
+  if (layer.props.fillType !== "linear") return { fill: layer.props.fill };
+  const angle = ((layer.props.gradientAngle || 0) * Math.PI) / 180;
+  const w = layer.w || 1;
+  const h = layer.h || 1;
+  const cx = w / 2;
+  const cy = h / 2;
+  const reach = (Math.abs(Math.cos(angle)) * w + Math.abs(Math.sin(angle)) * h) / 2;
+  return {
+    fillLinearGradientStartPoint: {
+      x: cx - Math.cos(angle) * reach, y: cy - Math.sin(angle) * reach,
+    },
+    fillLinearGradientEndPoint: {
+      x: cx + Math.cos(angle) * reach, y: cy + Math.sin(angle) * reach,
+    },
+    fillLinearGradientColorStops: [
+      0, layer.props.fill || "#ffffff",
+      1, layer.props.fill2 || "#000000",
+    ],
+  };
+}
+
 function buildNode(layer) {
   const common = {
     x: layer.x, y: layer.y,
@@ -634,7 +659,8 @@ function buildNode(layer) {
     node = new Konva.Group(common);
     node.add(new Konva.Ellipse({
       x: layer.w / 2, y: layer.h / 2, radiusX: layer.w / 2, radiusY: layer.h / 2,
-      fill: layer.props.fill, stroke: layer.props.stroke,
+      ...fillProps(layer),
+      stroke: layer.props.stroke,
       strokeWidth: layer.props.strokeWidth, name: "shape",
     }));
   } else if (layer.type === "star") {
@@ -699,7 +725,7 @@ function buildNode(layer) {
     node = new Konva.Group(common);
     node.add(new Konva.Rect({
       width: layer.w, height: layer.h, name: "shape",
-      fill: layer.props.fill, stroke: layer.props.stroke || "#111",
+      ...fillProps(layer), stroke: layer.props.stroke || "#111",
       strokeWidth: layer.props.strokeWidth != null ? layer.props.strokeWidth : 2,
       cornerRadius: layer.props.radius || 0,
     }));
@@ -1517,7 +1543,15 @@ function renderProps() {
     html += propField("Rotation", `<input data-k="rot" type="number" value="${layer.props.rot || 0}">`);
   }
   if (["rect", "ellipse", "star"].includes(layer.type)) {
+    html += propField("Fill type", `<select data-k="fillType">
+      <option value="solid" ${layer.props.fillType !== "linear" ? "selected" : ""}>Solid</option>
+      <option value="linear" ${layer.props.fillType === "linear" ? "selected" : ""}>Gradient</option>
+    </select>`);
     html += propField("Fill", `<input data-k="fill" type="color" value="${layer.props.fill}">`);
+    if (layer.props.fillType === "linear") {
+      html += propField("Fill 2", `<input data-k="fill2" type="color" value="${layer.props.fill2 || "#000000"}">`);
+      html += propField("Angle", `<input data-k="gradientAngle" type="number" value="${layer.props.gradientAngle || 0}">`);
+    }
     html += propField("Stroke", `<input data-k="stroke" type="color" value="${layer.props.stroke || "#111111"}">`);
     html += propField("Stroke px", `<input data-k="strokeWidth" type="number" value="${layer.props.strokeWidth != null ? layer.props.strokeWidth : 2}">`);
     if (layer.type === "rect") {
@@ -1559,7 +1593,7 @@ function renderProps() {
       else if (key === "text") layer.props.text = input.value;
       else if (key === "fontSize") layer.props.fontSize = parseInt(input.value, 10) || 16;
       else if (key === "lineHeight") layer.props.lineHeight = parseFloat(input.value) || 1.15;
-      else if (["strokeWidth", "rot", "radius", "letterSpacing"].includes(key)) layer.props[key] = parseInt(input.value, 10) || 0;
+      else if (["strokeWidth", "rot", "radius", "letterSpacing", "gradientAngle"].includes(key)) layer.props[key] = parseInt(input.value, 10) || 0;
       else layer.props[key] = input.value;
       renderCanvas();
       select(layer.id);
