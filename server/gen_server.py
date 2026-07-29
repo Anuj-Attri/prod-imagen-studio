@@ -527,6 +527,12 @@ LAYOUT_DIRECTIVES = {
     ),
 }
 
+DIAGRAM_HINT = (
+    "You returned panels. This project is a diagram, which must be exact, "
+    "so panels cannot be used. Return the JSON with a nodes list and an "
+    "edges list now, 4 to 12 components, reply at most 15 words."
+)
+
 BUILD_HINT = (
     "You returned no panels. The user wants a page built. Return the "
     "JSON with 2 to 6 panels now, reply at most 15 words."
@@ -598,9 +604,16 @@ def agent_chat(payload: dict, current: dict) -> dict:
     ] or [{"role": "user", "content": "hello"}]
     directive = LAYOUT_DIRECTIVES.get(payload.get("layout") or "panels", "")
     system = AGENT_SYSTEM + " " + directive + " Current project context: " + context
+    layout = payload.get("layout") or "panels"
     result = parse_agent_json(llm_chat(current, system, messages,
                                        max_tokens=1400, json_mode=True))
-    if not result["panels"] and looks_like_build_request(messages):
+    # A diagram project that came back as comic panels means the model
+    # dropped the contract; ask once more before giving up on it.
+    if layout == "blueprint" and not result.get("nodes"):
+        result = parse_agent_json(llm_chat(
+            current, system, messages + [{"role": "user", "content": DIAGRAM_HINT}],
+            max_tokens=1400, json_mode=True))
+    if layout != "blueprint" and not result["panels"] and looks_like_build_request(messages):
         # the model lapsed into prose: demand the page once more
         result = parse_agent_json(llm_chat(
             current, system, messages + [{"role": "user", "content": BUILD_HINT}],
@@ -648,6 +661,11 @@ def agent_chat(payload: dict, current: dict) -> dict:
         # an edge to a node that was never declared would draw into space
         if isinstance(e, dict) and str(e.get("from")) in known and str(e.get("to")) in known
     ][:32]
+
+    # Never hand a diagram project a comic page: wrong output entirely,
+    # and silently so.
+    if layout == "blueprint":
+        panels = []
 
     reply = short_reply(result["reply"])
     if panels and (len(reply) > 160 or not reply):

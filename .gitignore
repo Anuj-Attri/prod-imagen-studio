@@ -23,3 +23,6 @@ scratch/
 
 # self-test scaffolding, generated and removed per run
 studio/__selftest*
+
+# end to end output, regenerated on demand
+e2e-output/
