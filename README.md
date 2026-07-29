@@ -41,6 +41,58 @@ its own paper size, default look and build recipe.
   runs against a local language model. Nothing leaves the machine
   unless you configure a hosted provider yourself.
 
+## Making each of the five
+
+Every project is the same layered page. Pick the type in the launcher and
+the paper size, default look and build recipe follow from it.
+
+**A manga chapter.** Describe a scene in the Agent tab and the page is
+laid out for you: panels in reading order, right to left, with the
+dialogue placed inside them. Ask again and the next scene goes on a new
+page, so a chapter accumulates rather than overwriting itself. Open the
+Style tab first if you want a different look, and add your characters to
+the cast sheet: those appearance tags are prepended to every panel a
+character appears in, which is what stops them changing between pages.
+Pages, duplicate and reorder live in the Pages tab; export the finished
+chapter as a single PDF from File.
+
+**A coloring book.** The coloring type renders flat line art with no
+shading, ready to be coloured in. Ask for a scene, then use Build more
+pages in the Pages tab to get several variations on the same theme
+without retyping the brief.
+
+**A poster.** One artwork with the lower part of the page kept clear.
+The agent returns the headline and any secondary lines as real text
+layers, so edit them directly on the canvas: font, size, colour and
+outline are all in Properties.
+
+**A greeting card.** The artwork takes the upper two thirds and the
+greeting sits below it. Change the paper colour in the Style tab if the
+card wants a background other than white.
+
+**A systems blueprint.** No image is generated at all. The agent returns
+the components and how they connect, and the application draws them as
+boxes and arrows ordered by flow, every one an editable layer. Rename a
+box by double clicking it in the Layers list, or edit its label in
+Properties.
+
+## Working with the canvas
+
+Tools are on the left rail: select, brush, eraser, colour picker, AI
+panel, place image, balloon, caption, title, onomatopoeia, and a shapes
+group holding rectangle, ellipse, line, arrow and star. Their shortcuts
+are listed along the bottom of the window.
+
+Right click anything for cut, copy, duplicate, arrange, flip, group,
+lock, hide, and the actions particular to that layer. Hold alt while
+dragging to leave a copy behind. Rulers and guides are under View;
+dragging off a ruler drops a guide that layers snap to. Undo is
+unlimited within a session and the History tab lists the milestones so
+you can jump back to one.
+
+Closing with unsaved changes asks first, and a recovery copy is kept
+while work is unsaved, so a crash does not take the session with it.
+
 ## Install
 
 Download the installer for Windows (`.exe`) or macOS (`.dmg`) from the

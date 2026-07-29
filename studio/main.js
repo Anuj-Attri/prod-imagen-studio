@@ -194,6 +194,7 @@ function buildMenu() {
 
 ipcMain.handle("open-project", (_e, project) => { createEditor(project); return true; });
 ipcMain.handle("new-project-window", () => { createLauncher(); return true; });
+ipcMain.handle("version", () => app.getVersion());
 ipcMain.on("unsaved", (event, isDirty) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (win) unsaved.set(win.id, Boolean(isDirty));

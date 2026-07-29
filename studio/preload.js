@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("studio", {
   setUnsaved: (dirty) => ipcRenderer.send("unsaved", dirty),
   closeNow: () => ipcRenderer.send("close-now"),
   autosave: (contents) => ipcRenderer.invoke("autosave", contents),
+  version: () => ipcRenderer.invoke("version"),
   exportPdf: (payload) => ipcRenderer.invoke("export-pdf", payload),
   chooseFolder: () => ipcRenderer.invoke("choose-folder"),
   writePng: (filePath, dataUrl) => ipcRenderer.invoke("write-png", filePath, dataUrl),
