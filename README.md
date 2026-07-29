@@ -50,8 +50,10 @@ the paper size, default look and build recipe follow from it.
 **A manga chapter.** Describe a scene in the Agent tab and the page is
 laid out for you: panels in reading order, right to left, with the
 dialogue placed inside them. Ask again and the next scene goes on a new
-page, so a chapter accumulates rather than overwriting itself. Open the
-Style tab first if you want a different look, and add your characters to
+page, so a chapter accumulates rather than overwriting itself. If the
+chapter already exists as writing, paste it into Build from a script
+in the Pages tab and each paragraph becomes its own page, in order.
+Open the Style tab first if you want a different look, and add your characters to
 the cast sheet: those appearance tags are prepended to every panel a
 character appears in, which is what stops them changing between pages.
 Pages, duplicate and reorder live in the Pages tab; export the finished
