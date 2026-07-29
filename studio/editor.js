@@ -656,6 +656,8 @@ function buildNode(layer) {
       text: layer.props.text, fontFamily: fontOf(layer), fontStyle: "600",
       fontSize: layer.props.fontSize, fill: layer.props.color || "#111", padding: 13,
       width: layer.w, align: "center", wrap: "word", name: "label-text",
+      lineHeight: layer.props.lineHeight || 1.15,
+      letterSpacing: layer.props.letterSpacing || 0,
     }));
   } else if (layer.type === "caption") {
     node = new Konva.Group(common);
@@ -663,6 +665,8 @@ function buildNode(layer) {
       text: layer.props.text, fontFamily: fontOf(layer), fontSize: layer.props.fontSize,
       fill: layer.props.color || "#111", padding: 9, width: layer.w, name: "label-text",
       align: layer.props.align || "left",
+      lineHeight: layer.props.lineHeight || 1.15,
+      letterSpacing: layer.props.letterSpacing || 0,
     });
     node.add(new Konva.Rect({
       width: layer.w, height: text.height(), name: "frame",
@@ -676,6 +680,8 @@ function buildNode(layer) {
       fontStyle: layer.props.style || "700",
       fontSize: layer.props.fontSize, fill: layer.props.fill, width: layer.w,
       align: layer.props.align || "left", name: "label-text",
+      lineHeight: layer.props.lineHeight || 1.15,
+      letterSpacing: layer.props.letterSpacing || 0,
     }));
   } else if (layer.type === "sfx") {
     node = new Konva.Group(common);
@@ -685,6 +691,8 @@ function buildNode(layer) {
       stroke: layer.props.stroke, strokeWidth: layer.props.strokeWidth,
       fillAfterStrokeEnabled: true, lineJoin: "round",
       align: "center", name: "label-text",
+      lineHeight: layer.props.lineHeight || 1.15,
+      letterSpacing: layer.props.letterSpacing || 0,
     }));
   } else {
     node = new Konva.Group(common);
@@ -695,6 +703,7 @@ function buildNode(layer) {
       cornerRadius: layer.props.radius || 0,
     }));
   }
+  applyFlip(node, layer);
   node.opacity((layer.props.opacity != null ? layer.props.opacity : 100) / 100);
   if (layer.props.blend && layer.props.blend !== "normal") {
     node.globalCompositeOperation(layer.props.blend);
@@ -749,6 +758,24 @@ function buildNode(layer) {
   return node;
 }
 
+// Mirror the contents inside the layer's own box. Flipping the group
+// node itself would feed a negative scale and a shifted origin back
+// into the drag and transform handlers, which store node coordinates.
+function applyFlip(node, layer) {
+  if (!layer.props.flipX && !layer.props.flipY) return;
+  if (typeof node.getChildren !== "function") return;
+  node.getChildren().forEach((child) => {
+    if (layer.props.flipX) {
+      child.scaleX(-1);
+      child.x(layer.w - child.x());
+    }
+    if (layer.props.flipY) {
+      child.scaleY(-1);
+      child.y(layer.h - child.y());
+    }
+  });
+}
+
 function attachImage(group, layer) {
   const image = new window.Image();
   image.onload = () => {
@@ -768,6 +795,7 @@ function attachImage(group, layer) {
       });
     }
     group.add(art);
+    applyFlip(group, layer);
     const frame = group.findOne(".frame");
     if (frame) {
       frame.fillEnabled(false);
@@ -839,6 +867,7 @@ function select(id, opts = {}) {
     selectedIds = selectedIds.includes(id)
       ? selectedIds.filter((x) => x !== id) : [...selectedIds, id];
   } else selectedIds = [id];
+  selectedIds = expandGroups(selectedIds);
   syncSelection();
   if (id != null && !opts.toggle && selectedIds.length === 1) {
     document.querySelectorAll(".dock-tab").forEach((t) => t.classList.remove("active"));
@@ -1008,6 +1037,66 @@ function pasteClipboard() {
   commit();
 }
 function duplicateSelected() { copySelected(); pasteClipboard(); }
+
+// Flipping is a scale of -1 about the layer's own centre, stored so it
+// survives a re-render.
+function flipSelected(axis) {
+  const layers = selectedLayers();
+  if (!layers.length) return;
+  layers.forEach((layer) => {
+    if (POINT_TYPES.includes(layer.type)) {
+      const points = layer.props.points;
+      const coords = points.filter((_, i) => (i % 2 === 0) === (axis === "x"));
+      const mid = (Math.min(...coords) + Math.max(...coords)) / 2;
+      layer.props.points = points.map((v, i) =>
+        ((i % 2 === 0) === (axis === "x")) ? Math.round(2 * mid - v) : v);
+    } else {
+      const key = axis === "x" ? "flipX" : "flipY";
+      layer.props[key] = !layer.props[key];
+    }
+  });
+  const kept = [...selectedIds];
+  renderCanvas();
+  selectedIds = kept;
+  syncSelection();
+  commit(`Flip ${axis === "x" ? "horizontal" : "vertical"}`);
+}
+
+// Grouping keeps the layers in the model and marks them with a shared
+// group id, so selecting one selects the set.
+function groupSelected() {
+  const layers = selectedLayers();
+  if (layers.length < 2) { toast("Select two or more layers to group"); return; }
+  const groupId = uid();
+  layers.forEach((layer) => { layer.group = groupId; });
+  renderCanvas();
+  syncSelection();
+  commit("Group");
+  toast(`Grouped ${layers.length} layers`);
+}
+
+function ungroupSelected() {
+  const layers = selectedLayers().filter((l) => l.group);
+  if (!layers.length) { toast("Nothing grouped in the selection"); return; }
+  layers.forEach((layer) => { delete layer.group; });
+  renderCanvas();
+  syncSelection();
+  commit("Ungroup");
+}
+
+// Selecting any member of a group selects the whole group.
+function expandGroups(ids) {
+  const groups = new Set(ids.map((id) => {
+    const layer = findLayer(id);
+    return layer && layer.group;
+  }).filter(Boolean));
+  if (!groups.size) return ids;
+  const expanded = new Set(ids);
+  currentPage().layers.forEach((layer) => {
+    if (layer.group && groups.has(layer.group)) expanded.add(layer.id);
+  });
+  return [...expanded];
+}
 
 function reorderSelected(mode) {
   const arr = currentPage().layers;
@@ -1250,6 +1339,13 @@ function contextItemsForSelection() {
     { label: "Duplicate", accel: "Ctrl+D", run: duplicateSelected },
     { label: "Delete", accel: "Del", run: deleteSelected },
     "-",
+    { label: "Flip Horizontal", run: () => flipSelected("x") },
+    { label: "Flip Vertical", run: () => flipSelected("y") },
+    "-",
+    { label: layers.some((l) => l.group) ? "Ungroup" : "Group",
+      disabled: layers.length < 2 && !layers.some((l) => l.group),
+      run: () => (layers.some((l) => l.group) ? ungroupSelected() : groupSelected()) },
+    "-",
     { label: "Bring to Front", accel: "Ctrl+Shift+]", run: () => reorderSelected("front") },
     { label: "Bring Forward", accel: "Ctrl+]", run: () => reorderSelected("forward") },
     { label: "Send Backward", accel: "Ctrl+[", run: () => reorderSelected("backward") },
@@ -1391,6 +1487,8 @@ function renderProps() {
       `<option value="${f}" ${fontOf(layer) === f ? "selected" : ""}>${f}</option>`).join("");
     html += propField("Font", `<select data-k="font">${fontOptions}</select>`);
     html += propField("Text size", `<input data-k="fontSize" type="number" value="${layer.props.fontSize}">`);
+    html += propField("Line height", `<input data-k="lineHeight" type="number" step="0.05" value="${layer.props.lineHeight || 1.15}">`);
+    html += propField("Letter space", `<input data-k="letterSpacing" type="number" value="${layer.props.letterSpacing || 0}">`);
   }
   if (["balloon", "caption"].includes(layer.type)) {
     html += propField("Fill", `<input data-k="bg" type="color" value="${layer.props.bg || (layer.type === "balloon" ? "#ffffff" : "#fdf6de")}">`);
@@ -1447,7 +1545,8 @@ function renderProps() {
       else if (key === "seed") layer.props.seed = input.value === "" ? null : parseInt(input.value, 10);
       else if (key === "text") layer.props.text = input.value;
       else if (key === "fontSize") layer.props.fontSize = parseInt(input.value, 10) || 16;
-      else if (["strokeWidth", "rot", "radius"].includes(key)) layer.props[key] = parseInt(input.value, 10) || 0;
+      else if (key === "lineHeight") layer.props.lineHeight = parseFloat(input.value) || 1.15;
+      else if (["strokeWidth", "rot", "radius", "letterSpacing"].includes(key)) layer.props[key] = parseInt(input.value, 10) || 0;
       else layer.props[key] = input.value;
       renderCanvas();
       select(layer.id);
@@ -1808,6 +1907,11 @@ document.addEventListener("keydown", (event) => {
   if (event.ctrlKey || event.metaKey) {
     if (key === "z" && !event.shiftKey) { event.preventDefault(); undo(); return; }
     if (key === "y" || (key === "z" && event.shiftKey)) { event.preventDefault(); redo(); return; }
+    if (key === "g") {
+      event.preventDefault();
+      if (event.shiftKey) ungroupSelected(); else groupSelected();
+      return;
+    }
     if (key === "c") { event.preventDefault(); copySelected(); return; }
     if (key === "x") { event.preventDefault(); copySelected(); deleteSelected(); return; }
     if (key === "v") { event.preventDefault(); pasteClipboard(); return; }
@@ -2837,6 +2941,10 @@ const MENU_ACTIONS = {
   undo, redo, relayout: relayoutPage,
   duplicate: duplicateSelected,
   delete: deleteSelected,
+  group: groupSelected,
+  ungroup: ungroupSelected,
+  "flip-x": () => flipSelected("x"),
+  "flip-y": () => flipSelected("y"),
   "select-all": () => { selectedIds = currentPage().layers.map((l) => l.id); syncSelection(); },
   "zoom-in": () => setZoom(zoom * 1.2),
   "zoom-out": () => setZoom(zoom / 1.2),
@@ -2868,6 +2976,12 @@ const MENUS = [
     ["Duplicate", "duplicate", "Ctrl+D"],
     ["Select All", "select-all", "Ctrl+A"],
     ["Delete", "delete", "Del"],
+    ["-"],
+    ["Group", "group", "Ctrl+G"],
+    ["Ungroup", "ungroup", "Ctrl+Shift+G"],
+    ["-"],
+    ["Flip Horizontal", "flip-x"],
+    ["Flip Vertical", "flip-y"],
   ]],
   ["View", [
     ["Zoom In", "zoom-in", "Ctrl+="],

@@ -624,6 +624,44 @@ check("page delete keeps at least one", () => {
   return doc.pages.length === 1;
 });
 
+// editing depth
+check("flip is remembered and mirrors content", () => {
+  const layer = addLayer("rect", { x: 40, y: 40, w: 100, h: 60 });
+  select(layer.id);
+  flipSelected("x");
+  const flipped = findLayer(layer.id);
+  if (flipped.props.flipX !== true) return "not stored";
+  const child = nodes.get(layer.id).getChildren()[0];
+  return child.scaleX() === -1;
+});
+check("flip does not move the layer", () => {
+  const layer = addLayer("rect", { x: 200, y: 90, w: 80, h: 40 });
+  select(layer.id);
+  flipSelected("x");
+  flipSelected("y");
+  const after = findLayer(layer.id);
+  return after.x === 200 && after.y === 90;
+});
+check("group selects together", () => {
+  const a = addLayer("rect", { x: 10, y: 400, w: 40, h: 40 });
+  const b = addLayer("rect", { x: 60, y: 400, w: 40, h: 40 });
+  selectedIds = [a.id, b.id];
+  groupSelected();
+  select(a.id);
+  return selectedIds.length === 2 && selectedIds.includes(b.id);
+});
+check("ungroup releases", () => {
+  ungroupSelected();
+  const a = currentPage().layers.find(l => l.group);
+  return a === undefined;
+});
+check("line height reaches the text node", () => {
+  const layer = addLayer("caption", { x: 10, y: 500 });
+  layer.props.lineHeight = 1.8;
+  renderCanvas();
+  return nodes.get(layer.id).findOne(".label-text").lineHeight() === 1.8;
+});
+
 // history
 check("named checkpoints recorded", () => {
   checkpoint("Test checkpoint");
