@@ -49,3 +49,15 @@ jobs:
 
       - name: Renderer self-test
         run: node studio/selftest.js
+
+      # Neither an image engine nor a language backend exists here, so the
+      # probe checks the half that does not need them: a bad request must
+      # be answered plainly rather than with an internal error.
+      - name: Server rejects bad input cleanly
+        run: |
+          python -m server.gen_server &
+          for i in $(seq 1 20); do
+            curl -sf http://127.0.0.1:8787/health > /dev/null && break
+            sleep 1
+          done
+          python server/probe.py

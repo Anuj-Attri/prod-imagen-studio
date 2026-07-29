@@ -29,26 +29,48 @@ def call(path, body=None, raw=None, method="POST"):
         return None, str(error)[:150]
 
 
-CASES = [
+# Rejected before any engine or model is consulted, so these hold
+# anywhere, including a continuous integration machine with neither.
+VALIDATION_CASES = [
     ("malformed JSON body", "/generate", None, b"{ not json at all", 400),
     ("empty body", "/generate", None, b"", 400),
     ("missing prompt", "/generate", {"engine": "local-gpu"}, None, 400),
     ("unknown engine", "/generate", {"engine": "nonesuch", "prompt": "x"}, None, 400),
     ("prompt far too long", "/generate",
      {"engine": "local-gpu", "prompt": "a " * 60000}, None, 400),
+    ("unknown endpoint", "/nope", {}, None, 404),
+]
+
+# These reach the language backend, so they need one to be configured.
+BACKEND_CASES = [
     ("agent: no messages", "/agent/chat", {}, None, 200),
     ("agent: messages not a list", "/agent/chat", {"messages": "hello"}, None, 200),
     ("agent: entries not objects", "/agent/chat", {"messages": ["hi", 3]}, None, 200),
     ("agent: only junk roles", "/agent/chat",
      {"messages": [{"role": "system", "content": "x"}]}, None, 200),
     ("story: empty payload", "/story/analyze", {}, None, 200),
-    ("unknown endpoint", "/nope", {}, None, 404),
 ]
 
 
+def language_backend_present():
+    status, detail = call("/health", method="GET")
+    if status != 200:
+        return False
+    try:
+        return bool(json.loads(detail).get("story"))
+    except Exception:
+        return False
+
+
 def main():
+    cases = list(VALIDATION_CASES)
+    if language_backend_present():
+        cases += BACKEND_CASES
+    else:
+        print("no language backend configured: checking input validation only\n")
+
     failures = 0
-    for name, path, body, raw, expected in CASES:
+    for name, path, body, raw, expected in cases:
         status, detail = call(path, body, raw)
         if status is None:
             print(f" DROPPED  {name}: {detail}")
@@ -68,7 +90,7 @@ def main():
     print(f"\nserver alive afterwards: {alive}")
     if not alive:
         failures += 1
-    print(f"{len(CASES) - failures}/{len(CASES)} handled as intended")
+    print(f"{len(cases) - failures}/{len(cases)} handled as intended")
     return 1 if failures else 0
 
 
