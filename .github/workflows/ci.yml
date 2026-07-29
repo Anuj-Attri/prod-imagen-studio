@@ -17,15 +17,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Syntax-check main process and renderer
-        run: |
-          node --check studio/main.js
-          node --check studio/preload.js
-          node --check studio/editor.js
-
-      - name: Compile server
-        run: python -m py_compile server/gen_server.py
-
       - name: Secret hygiene
         run: |
           if grep -RInE "(sk-[A-Za-z0-9]{20,}|rpa_[A-Za-z0-9]{20,}|(api|secret)_key[\"']?\s*[:=]\s*[\"'][A-Za-z0-9_-]{16,})" \
@@ -47,17 +38,7 @@ jobs:
         working-directory: studio
         run: npm ci
 
-      - name: Renderer self-test
-        run: node studio/selftest.js
-
-      # Neither an image engine nor a language backend exists here, so the
-      # probe checks the half that does not need them: a bad request must
-      # be answered plainly rather than with an internal error.
-      - name: Server rejects bad input cleanly
-        run: |
-          python -m server.gen_server &
-          for i in $(seq 1 20); do
-            curl -sf http://127.0.0.1:8787/health > /dev/null && break
-            sleep 1
-          done
-          python server/probe.py
+      # The same entry point a contributor runs, so the build cannot
+      # drift away from what they are told to check.
+      - name: Verify
+        run: node verify.js

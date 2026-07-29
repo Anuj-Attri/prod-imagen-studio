@@ -160,6 +160,17 @@ address and token. The container carries no image engine of its own, so
 either give it the key for a hosted one, or keep generation local and
 use the deployment for the agent alone.
 
+## Checks
+
+    node verify.js
+
+Parses every source, compiles the server, boots the real renderer and
+puts bad input at the server. Needs no graphics card and no model, so it
+runs anywhere. Two more need hardware:
+
+    node studio/e2e.js               produce one of each document type
+    node studio/e2e.js --contract 5  does the agent hold its shape
+
 ## Security
 
 - Keys are never committed: `server/keys.json` is gitignored and CI
