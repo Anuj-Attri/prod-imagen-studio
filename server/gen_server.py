@@ -667,6 +667,15 @@ def agent_chat(payload: dict, current: dict) -> dict:
     if layout == "blueprint":
         panels = []
 
+    # A poster, a card or a single illustration is one artwork. If the
+    # model returns several beats anyway, keep the first as the subject
+    # and carry every line of lettering, rather than merging four scene
+    # descriptions into one prompt and rendering the average of them.
+    if layout in ("single", "poster", "card") and len(panels) > 1:
+        merged = dict(panels[0])
+        merged["dialogue"] = [d for p in panels for d in p["dialogue"]][:5]
+        panels = [merged]
+
     reply = short_reply(result["reply"])
     if panels and (len(reply) > 160 or not reply):
         reply = f"Built a {len(panels)} panel page."

@@ -60,7 +60,48 @@ function post(pathname, body, timeoutMs) {
   });
 }
 
+// Local models drop structured contracts intermittently. Asking each
+// document type repeatedly is the only way to see it: a single passing
+// run says nothing about the next one.
+async function contractRun(times) {
+  const expectations = {
+    manga: (r) => (r.panels || []).length >= 2 && (r.panels || []).length <= 6,
+    coloring: (r) => (r.panels || []).length === 1,
+    poster: (r) => (r.panels || []).length === 1,
+    card: (r) => (r.panels || []).length === 1,
+    blueprint: (r) => (r.nodes || []).length >= 4 && (r.panels || []).length === 0,
+  };
+  let bad = 0;
+  for (const [kind, layout, brief] of CASES) {
+    const shapes = [];
+    let held = 0;
+    for (let i = 0; i < times; i += 1) {
+      try {
+        const plan = await post("/agent/chat", {
+          messages: [{ role: "user", content: brief }],
+          project: "contract", kind, layout, cast: [], pages: [],
+        }, 400000);
+        const ok = expectations[kind](plan);
+        if (ok) held += 1;
+        shapes.push((plan.panels || []).length + "p/" + (plan.nodes || []).length + "n");
+      } catch (error) {
+        shapes.push("error");
+      }
+    }
+    const passed = held === times;
+    if (!passed) bad += 1;
+    console.log(`${passed ? "  ok  " : " FAIL "} ${kind}: held ${held}/${times}  [${shapes.join(" ")}]`);
+  }
+  console.log(`\n${CASES.length - bad}/${CASES.length} document types held their contract across ${times} runs`);
+  process.exit(bad ? 1 : 0);
+}
+
 (async () => {
+  const contractFlag = process.argv.indexOf("--contract");
+  if (contractFlag !== -1) {
+    await contractRun(Number(process.argv[contractFlag + 1]) || 3);
+    return;
+  }
   fs.mkdirSync(outDir, { recursive: true });
   let failed = 0;
 
