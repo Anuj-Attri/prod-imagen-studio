@@ -89,7 +89,17 @@ def ask(model: str, system: str, user: str, key: str, timeout: int = 120) -> dic
     # words somewhere else, or spend the whole reply on reasoning and send
     # back nothing at all. Reading only content scored those as crashes,
     # which blamed the model for a fault in the reading.
-    text = (message.get("content") or message.get("reasoning") or "").strip()
+    #
+    # Stripping has to come before the choice, not after it: a content
+    # field holding a single newline is truthy, so falling back on
+    # truthiness picks the newline, strips it to nothing, and discards the
+    # answer sitting in the next field.
+    text = ""
+    for field in ("content", "reasoning"):
+        candidate = (message.get(field) or "").strip()
+        if candidate:
+            text = candidate
+            break
     return {
         "text": text,
         "empty": not text,

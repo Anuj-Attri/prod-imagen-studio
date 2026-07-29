@@ -1802,6 +1802,30 @@ check("asking for another take still gives a different one", () => {
     : "another take reproduced the same art";
 });
 
+check("a name that is not in the cast does not silently anchor the art", () => {
+  // Raised by the automated review: nothing covered a panel naming
+  // somebody who has been renamed or deleted. It falls back to the
+  // positional seed, which is right, but if it had instead resolved to a
+  // shared empty value every such panel would have drawn the same thing.
+  resetForCheck("manga");
+  doc.style.lockSeed = true;
+  doc.style.seedBase = 1000;
+  doc.cast = [{ id: "c1", name: "Rin", tags: "1girl" }];
+
+  const ghost = addLayer("panel", { x: 0, y: 0, w: 200, h: 200 });
+  ghost.props.cast = ["SomebodyDeleted"];
+  const alsoGhost = addLayer("panel", { x: 220, y: 0, w: 200, h: 200 });
+  alsoGhost.props.cast = ["AnotherMissingName"];
+  const real = addLayer("panel", { x: 0, y: 220, w: 200, h: 200 });
+  real.props.cast = ["Rin"];
+
+  if (panelSeed(ghost) === panelSeed(alsoGhost)) {
+    return "two panels naming different missing people drew the same art";
+  }
+  return panelSeed(ghost) !== panelSeed(real) ? true
+    : "a missing name anchored to the same art as a real cast member";
+});
+
 check("a panel with nobody in it still gets its own art", () => {
   resetForCheck("manga");
   doc.style.lockSeed = true;
