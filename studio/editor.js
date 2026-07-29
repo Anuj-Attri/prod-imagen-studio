@@ -764,7 +764,7 @@ document.getElementById("theme-toggle").onclick = () => {
   localStorage.setItem("studio-theme", next);
 };
 
-const chatHistory = [];
+const chatHistory = (doc.chat = doc.chat || []);
 async function sendChat() {
   const input = document.getElementById("chat-input");
   const text = input.value.trim();
@@ -828,6 +828,7 @@ document.getElementById("settings-save").onclick = async () => {
   loadEngines();
 };
 
+chatHistory.forEach((m) => appendMsg(m.role === "user" ? "user" : "agent", m.content));
 document.getElementById("chat-send").onclick = sendChat;
 document.getElementById("chat-input").addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendChat(); }

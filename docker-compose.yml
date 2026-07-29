@@ -1,0 +1,39 @@
+## prod-imagen studio backend: generation server + local open-model LLM.
+## Models are pulled at runtime from public registries; nothing heavy in git.
+##
+##   docker compose up -d
+##   docker compose exec ollama ollama pull qwen3:8b
+##
+## GPU (optional, NVIDIA): uncomment the deploy block under ollama.
+## Public deployment: set STUDIO_AUTH_TOKEN and put this behind TLS.
+
+services:
+  server:
+    build: ./server
+    ports:
+      - "8787:8787"
+    environment:
+      STUDIO_HOST: 0.0.0.0
+      LLM_BASE_URL: http://ollama:11434/v1
+      LLM_MODEL: qwen3:8b
+      # STUDIO_AUTH_TOKEN: change-me
+      # IDEOGRAM_API_KEY / OPENAI_API_KEY / BFL_API_KEY as needed
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-models:/root/.ollama
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    restart: unless-stopped
+
+volumes:
+  ollama-models:
