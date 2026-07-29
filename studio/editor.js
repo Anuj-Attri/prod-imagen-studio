@@ -7,6 +7,22 @@
 
 const SERVER = "http://127.0.0.1:8787";
 
+// Outside Electron (a browser, a test harness) the preload bridge does
+// not exist. Without this shim the first call to it throws during start
+// up and every later line of init silently never runs.
+if (!window.studio) {
+  const unavailable = () => {
+    toast("This action needs the desktop app", true);
+    return null;
+  };
+  window.studio = {
+    openProject: unavailable, saveProjectDialog: unavailable, writeFile: unavailable,
+    readFileDialog: unavailable, exportPngDialog: unavailable, chooseFolder: unavailable,
+    writePng: unavailable, newProjectWindow: unavailable, openProjectFile: unavailable,
+    saveKeys: unavailable, loadKeys: async () => ({}), win: () => {}, onMenu: null,
+  };
+}
+
 // Surface any failure instead of dying silently.
 window.onerror = (message, _src, line) => {
   try { toast(`error: ${message} (line ${line})`, true); } catch (_) { /* noop */ }
@@ -146,7 +162,14 @@ const paint = {
 };
 
 function uid() { return Math.random().toString(36).slice(2, 10); }
-function currentPage() { return doc.pages[pageIndex]; }
+function currentPage() {
+  // Never hand back undefined: a restored history entry, a reordered
+  // document or a hand-edited file can leave the index past the end,
+  // and every caller reaches straight for .layers.
+  if (!doc.pages.length) doc.pages.push({ id: uid(), name: "Page 1", layers: [] });
+  pageIndex = Math.min(Math.max(pageIndex, 0), doc.pages.length - 1);
+  return doc.pages[pageIndex];
+}
 function findLayer(id) { return currentPage().layers.find((l) => l.id === id); }
 function primaryLayer() { return selectedIds.length === 1 ? findLayer(selectedIds[0]) : null; }
 function selectedLayers() { return selectedIds.map(findLayer).filter(Boolean); }
@@ -794,6 +817,7 @@ function renderCanvas() {
   pageLayer.batchDraw();
   renderLayerList();
   renderPageLabel();
+  renderPageGrid();
 }
 
 function syncSelection() {
@@ -1831,19 +1855,76 @@ document.addEventListener("keydown", (event) => {
 function renderPageLabel() {
   document.getElementById("page-label").textContent = `Page ${pageIndex + 1}/${doc.pages.length}`;
 }
-document.getElementById("page-add").onclick = () => {
-  doc.pages.push({ id: uid(), name: `Page ${doc.pages.length + 1}`, layers: [] });
-  pageIndex = doc.pages.length - 1;
+
+// A chapter is many pages, so they need to be visible and rearrangeable
+// rather than reachable only through the previous and next arrows.
+function goToPage(index) {
+  if (index < 0 || index >= doc.pages.length) return;
+  pageIndex = index;
   selectedIds = [];
   renderCanvas();
-  commit();
-};
-document.getElementById("page-prev").onclick = () => {
-  if (pageIndex > 0) { pageIndex -= 1; selectedIds = []; renderCanvas(); }
-};
-document.getElementById("page-next").onclick = () => {
-  if (pageIndex < doc.pages.length - 1) { pageIndex += 1; selectedIds = []; renderCanvas(); }
-};
+}
+
+function renderPageGrid() {
+  const grid = document.getElementById("page-grid");
+  if (!grid) return;
+  grid.innerHTML = "";
+  doc.pages.forEach((page, index) => {
+    const card = document.createElement("div");
+    card.className = "page-card" + (index === pageIndex ? " sel" : "");
+    card.draggable = true;
+    const art = page.layers.find((l) => l.props && l.props.image);
+    card.innerHTML =
+      `<div class="shot">${art
+        ? `<img src="${art.props.image}" alt="">`
+        : `<span style="color:var(--ink-3);font-size:11px">empty</span>`}</div>` +
+      `<div class="cap"><span>${index + 1}</span>` +
+      `<span class="kill mini" title="Delete page">x</span></div>`;
+    card.addEventListener("click", (event) => {
+      if (event.target.classList.contains("kill")) {
+        if (doc.pages.length === 1) { toast("A document needs one page"); return; }
+        doc.pages.splice(index, 1);
+        if (pageIndex >= doc.pages.length) pageIndex = doc.pages.length - 1;
+        selectedIds = [];
+        renderCanvas();
+        commit("Delete page");
+        return;
+      }
+      goToPage(index);
+    });
+    card.addEventListener("dragstart", (e) => e.dataTransfer.setData("text/plain", String(index)));
+    card.addEventListener("dragover", (e) => e.preventDefault());
+    card.addEventListener("drop", (e) => {
+      e.preventDefault();
+      const from = Number(e.dataTransfer.getData("text/plain"));
+      if (Number.isNaN(from) || from === index) return;
+      const current = doc.pages[pageIndex];
+      const [moved] = doc.pages.splice(from, 1);
+      doc.pages.splice(index, 0, moved);
+      pageIndex = doc.pages.indexOf(current);
+      renderCanvas();
+      commit("Reorder pages");
+    });
+    grid.appendChild(card);
+  });
+}
+
+function addPage(copyCurrent) {
+  const page = copyCurrent
+    ? { ...JSON.parse(JSON.stringify(currentPage())), id: uid() }
+    : { id: uid(), name: `Page ${doc.pages.length + 1}`, layers: [] };
+  if (copyCurrent) page.layers.forEach((l) => { l.id = uid(); });
+  doc.pages.splice(pageIndex + 1, 0, page);
+  pageIndex += 1;
+  selectedIds = [];
+  renderCanvas();
+  commit(copyCurrent ? "Duplicate page" : "Add page");
+}
+document.getElementById("page-add").onclick = () => addPage(false);
+document.getElementById("page-new").onclick = () => addPage(false);
+document.getElementById("page-dupe").onclick = () => addPage(true);
+document.getElementById("page-prev").onclick = () => goToPage(pageIndex - 1);
+document.getElementById("page-next").onclick = () => goToPage(pageIndex + 1);
 
 // ------------------------------------------------------------ generation --
 async function loadEngines() {
@@ -2486,6 +2567,53 @@ document.getElementById("save").onclick = async () => {
   toast("Saved");
 };
 
+// Rendering a page that is not on screen: swap it in, snapshot, swap
+// back. The canvas only ever draws the current page.
+function renderPageToDataUrl() {
+  transformer.nodes([]);
+  guides.destroyChildren();
+  const priorZoom = zoom;
+  const priorPos = world.position();
+  zoom = 1;
+  world.position({ x: 0, y: 0 });
+  applyView();
+  const url = stage.toDataURL({ x: 0, y: 0, width: PAGE.w, height: PAGE.h, pixelRatio: 2 });
+  zoom = priorZoom;
+  world.position(priorPos);
+  applyView();
+  return url;
+}
+
+document.getElementById("export-all").onclick = async () => {
+  const folder = await window.studio.chooseFolder();
+  if (!folder) return;
+  const startPage = pageIndex;
+  const startSelection = [...selectedIds];
+  setBusy("Exporting pages");
+  let written = 0;
+  try {
+    for (let i = 0; i < doc.pages.length; i += 1) {
+      pageIndex = i;
+      selectedIds = [];
+      renderCanvas();
+      // let queued image decodes finish before snapshotting
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      setBusy(`Exporting page ${i + 1} of ${doc.pages.length}`);
+      const name = `${doc.name}-p${String(i + 1).padStart(2, "0")}.png`;
+      await window.studio.writePng(`${folder}/${name}`, renderPageToDataUrl());
+      written += 1;
+    }
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    pageIndex = startPage;
+    selectedIds = startSelection;
+    renderCanvas();
+    setBusy(null);
+  }
+  if (written) toast(`Exported ${written} page${written === 1 ? "" : "s"} to ${folder}`);
+};
+
 document.getElementById("export").onclick = async () => {
   transformer.nodes([]);
   guides.destroyChildren();
@@ -2715,9 +2843,11 @@ const MENU_ACTIONS = {
   "zoom-fit": fitPage,
   theme: () => document.getElementById("theme-toggle").click(),
   settings: () => document.getElementById("settings-btn").click(),
-  "page-next": () => document.getElementById("page-next").click(),
-  "page-prev": () => document.getElementById("page-prev").click(),
-  "page-add": () => document.getElementById("page-add").click(),
+  "page-next": () => goToPage(pageIndex + 1),
+  "page-prev": () => goToPage(pageIndex - 1),
+  "page-add": () => addPage(false),
+  "page-dupe": () => addPage(true),
+  "export-all": () => document.getElementById("export-all").click(),
   "analyze-story": () => document.getElementById("story-analyze").click(),
 };
 
@@ -2729,6 +2859,7 @@ const MENUS = [
     ["Save", "save", "Ctrl+S"],
     ["Save As...", "save-as", "Ctrl+Shift+S"],
     ["Export Page as PNG...", "export", "Ctrl+E"],
+    ["Export All Pages...", "export-all"],
   ]],
   ["Edit", [
     ["Undo", "undo", "Ctrl+Z"],
@@ -2750,6 +2881,7 @@ const MENUS = [
     ["Previous Page", "page-prev", "Ctrl+Left"],
     ["Next Page", "page-next", "Ctrl+Right"],
     ["Add Page", "page-add"],
+    ["Duplicate Page", "page-dupe"],
     ["-"],
     ["Re-flow Panels", "relayout"],
     ["Analyze Story", "analyze-story"],
@@ -2808,7 +2940,7 @@ const MENUS = [
   document.addEventListener("keydown", (event) => { if (event.key === "Escape") close(); });
 })();
 
-if (window.studio.onMenu) window.studio.onMenu((action) => {
+if (window.studio && window.studio.onMenu) window.studio.onMenu((action) => {
   const run = MENU_ACTIONS[action];
   if (run) run();
 });

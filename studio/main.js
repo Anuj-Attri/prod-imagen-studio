@@ -190,6 +190,16 @@ ipcMain.handle("export-png-dialog", async (_e, suggestedName, dataUrl) => {
   return result.filePath;
 });
 
+ipcMain.handle("choose-folder", async () => {
+  const result = await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] });
+  return result.canceled || !result.filePaths.length ? null : result.filePaths[0];
+});
+ipcMain.handle("write-png", async (_e, filePath, dataUrl) => {
+  fs.writeFileSync(filePath,
+    Buffer.from(dataUrl.replace(/^data:image\/png;base64,/, ""), "base64"));
+  return true;
+});
+
 ipcMain.handle("save-keys", async (_e, data) => {
   const keysPath = path.join(__dirname, "..", "server", "keys.json");
   fs.writeFileSync(keysPath, JSON.stringify(data, null, 2), "utf-8");

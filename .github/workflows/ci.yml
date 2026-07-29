@@ -43,25 +43,9 @@ jobs:
             fi
           done
 
-      - name: Renderer loads without console errors
-        run: |
-          cd studio && npm ci
-          node - <<'NODE'
-          const fs = require("fs");
-          const html = fs.readFileSync("editor.html", "utf-8");
-          for (const id of ["canvas-wrap", "canvas-overlay", "dock", "menubar", "tools"]) {
-            if (!html.includes(`id="${id}"`)) {
-              console.error(`editor.html is missing #${id}`);
-              process.exit(1);
-            }
-          }
-          // Konva clears its container, so overlay UI must be a sibling
-          const wrap = html.indexOf('id="canvas-wrap"');
-          const overlay = html.indexOf('id="canvas-overlay"');
-          if (html.slice(wrap, overlay).includes("<div id=\"canvas-overlay\"") === false
-              && overlay < wrap) {
-            console.error("canvas-overlay must follow canvas-wrap as a sibling");
-            process.exit(1);
-          }
-          console.log("structure checks passed");
-          NODE
+      - name: Install renderer dependencies
+        working-directory: studio
+        run: npm ci
+
+      - name: Renderer self-test
+        run: node studio/selftest.js
