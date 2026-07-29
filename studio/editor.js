@@ -162,6 +162,7 @@ doc.style = doc.style || {
 if (!doc.style.pageMode) doc.style.pageMode = "page";
 if (!doc.style.pageBg) doc.style.pageBg = "#ffffff";
 doc.cast = doc.cast || [];
+normalizeDocument(doc);
 let savePath = project._path || null;
 let pageIndex = 0;
 let selectedIds = [];
@@ -177,6 +178,36 @@ const paint = {
 };
 
 function uid() { return Math.random().toString(36).slice(2, 10); }
+// A project file is plain JSON. People hand edit it, a truncated write
+// leaves something parseable but incomplete, and an older build wrote
+// fields a newer one expects. Fill the gaps rather than throwing on the
+// first missing one.
+function normalizeDocument(document_) {
+  if (!Array.isArray(document_.pages) || !document_.pages.length) {
+    document_.pages = [{ id: uid(), name: "Page 1", layers: [] }];
+  }
+  document_.pages.forEach((page, index) => {
+    if (!page.id) page.id = uid();
+    if (!page.name) page.name = `Page ${index + 1}`;
+    if (!Array.isArray(page.layers)) page.layers = [];
+    page.layers = page.layers.filter((layer) => layer && typeof layer === "object");
+    page.layers.forEach((layer) => {
+      if (!layer.id) layer.id = uid();
+      if (typeof layer.type !== "string") layer.type = "rect";
+      if (typeof layer.name !== "string") layer.name = layer.type;
+      if (!layer.props || typeof layer.props !== "object") layer.props = {};
+      ["x", "y", "w", "h"].forEach((key) => {
+        if (typeof layer[key] !== "number" || !Number.isFinite(layer[key])) {
+          layer[key] = key === "w" || key === "h" ? 100 : 0;
+        }
+      });
+      if (typeof layer.visible !== "boolean") layer.visible = true;
+      if (typeof layer.locked !== "boolean") layer.locked = false;
+    });
+  });
+  return document_;
+}
+
 function currentPage() {
   // Never hand back undefined: a restored history entry, a reordered
   // document or a hand-edited file can leave the index past the end,
@@ -279,6 +310,7 @@ function restore(entry) {
   const chat = doc.chat;
   doc = JSON.parse(entry.json);
   rehydrateImages(doc);
+  normalizeDocument(doc);
   doc.chat = chat;
   if (pageIndex >= doc.pages.length) pageIndex = doc.pages.length - 1;
   selectedIds = selectedIds.filter((id) => currentPage().layers.some((l) => l.id === id));

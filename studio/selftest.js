@@ -525,6 +525,58 @@ check("build more pages is clamped to something sane", () => {
   return asked === 12;
 });
 
+// A project file is plain JSON that people will hand edit, and a
+// truncated write leaves something parseable but wrong. None of it
+// should take the editor down.
+check("a layer with no props does not break rendering", () => {
+  currentPage().layers = [{ id: uid(), type: "rect", name: "Broken",
+                            x: 10, y: 10, w: 50, h: 50, visible: true, locked: false }];
+  normalizeDocument(doc);
+  renderCanvas();
+  return currentPage().layers.length === 1;
+});
+check("a document with no pages at all is repaired", () => {
+  doc.pages = [];
+  normalizeDocument(doc);
+  pageIndex = 0;
+  renderCanvas();
+  return doc.pages.length === 1 && Array.isArray(currentPage().layers);
+});
+check("entries that are not layers are dropped", () => {
+  currentPage().layers = [null, "oops", 42,
+    { id: uid(), type: "rect", props: {}, x: 0, y: 0, w: 10, h: 10 }];
+  normalizeDocument(doc);
+  renderCanvas();
+  return currentPage().layers.length === 1;
+});
+check("a layer of an unknown type still renders", () => {
+  currentPage().layers = [{ id: uid(), type: "sparkle", name: "Odd",
+                            x: 10, y: 10, w: 50, h: 50, visible: true,
+                            locked: false, props: {} }];
+  renderCanvas();
+  return nodes.size === 1;
+});
+check("a layer missing its geometry still renders", () => {
+  currentPage().layers = [{ id: uid(), type: "text", name: "No box", props: {} }];
+  renderCanvas();
+  return nodes.size === 1;
+});
+check("a page with no layers array does not break", () => {
+  doc.pages = [{ id: uid(), name: "Empty" }];
+  pageIndex = 0;
+  normalizeDocument(doc);
+  renderCanvas();
+  return currentPage().layers.length === 0;
+});
+check("properties of a damaged layer can still be shown", () => {
+  currentPage().layers = [{ id: uid(), type: "panel", name: "Damaged",
+                            x: 0, y: 0, w: 100, h: 100, visible: true, locked: false }];
+  normalizeDocument(doc);
+  renderCanvas();
+  select(currentPage().layers[0].id);
+  return document.getElementById("props-body").innerHTML.length > 0;
+});
+
 // layout engine
 check("templates yield their panel count", () => {
   for (let n = 1; n <= 8; n += 1) if (pageLayout(n).length !== n) return "n=" + n;
