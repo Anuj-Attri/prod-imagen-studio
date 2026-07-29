@@ -28,11 +28,14 @@
       "buildResources": "../build"
     },
     "files": [
-      "**/*",
-      "!dist",
-      "!**/*.map",
-      "!selftest.js",
-      "!__selftest*"
+      "main.js",
+      "preload.js",
+      "editor.html",
+      "editor.js",
+      "launcher.html",
+      "launcher.js",
+      "package.json",
+      "node_modules/**/*"
     ],
     "win": {
       "target": [
