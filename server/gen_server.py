@@ -46,7 +46,8 @@ NO_TEXT_SUFFIX = ", no text, no letters, no speech balloons, no captions, no wat
 # This server is meant to be deployable, so requests are bounded and a
 # bad one is answered plainly rather than with an internal error.
 MAX_PROMPT = 8000
-KNOWN_ENGINES = ("local-gpu", "ideogram", "openai-image", "bfl-flux")
+KNOWN_ENGINES = ("openrouter-image", "local-gpu", "ideogram",
+                 "openai-image", "bfl-flux")
 
 
 def keys() -> dict:
@@ -797,8 +798,60 @@ def agent_chat(payload: dict, current: dict) -> dict:
 
 
 # -------------------------------------------------------------------- server --
+def generate_openrouter_image(prompt: str, width: int, height: int,
+                             key: str, negative: str = "") -> bytes:
+    """An image from a frontier model, through the key already configured.
+
+    This is the engine somebody who only installed the application can
+    actually use. A local checkpoint is free and private and needs a
+    graphics card, a CUDA build of torch and thirteen gigabytes of weights,
+    none of which a person who was sent an installer has.
+
+    These models take a description rather than a tag list, and refuse a
+    negative prompt outright, so what would have been a negative is folded
+    into the description as something to avoid.
+    """
+    model = routing.image_model()
+    if not model:
+        raise RuntimeError("no image model available from the provider")
+
+    brief = prompt.rstrip(" ,")
+    if negative.strip(" ,"):
+        brief += f". Avoid: {negative.strip(' ,')}."
+    brief += (f" Aspect ratio about {width}:{height}."
+              f" No text, letters, watermarks or speech balloons anywhere"
+              f" in the image.")
+
+    result = http_json(
+        "https://openrouter.ai/api/v1/chat/completions",
+        {"model": model,
+         "messages": [{"role": "user", "content": brief}],
+         "modalities": ["image", "text"]},
+        {"Authorization": f"Bearer {key}", "X-Title": "Firestarter"},
+        timeout=300,
+    )
+    message = (result.get("choices") or [{}])[0].get("message") or {}
+
+    # Providers disagree about where an image goes, so look where they put
+    # them rather than insisting on one shape.
+    places = list(message.get("images") or [])
+    if isinstance(message.get("content"), list):
+        places += message["content"]
+    for item in places:
+        url = ((item or {}).get("image_url") or {}).get("url") or ""
+        if url.startswith("data:"):
+            return base64.b64decode(url.split(",", 1)[1])
+    raise RuntimeError(
+        f"{model} answered without an image. Keys in the reply: "
+        + ", ".join(sorted(message))
+    )
+
+
 def engine_table(current: dict) -> list:
     table = [
+        {"id": "openrouter-image",
+         "label": "Frontier image model (hosted)",
+         "available": bool(current.get("openrouter"))},
         {"id": "ideogram", "label": "Ideogram (hosted API)", "available": bool(current["ideogram"])},
         {"id": "openai-image", "label": "OpenAI image (hosted API)", "available": bool(current["openai"])},
         {"id": "bfl-flux", "label": "FLUX (hosted API)", "available": bool(current["bfl"])},
@@ -871,7 +924,8 @@ class Handler(BaseHTTPRequestHandler):
                 "build": BUILD,
                 "auth": bool(limits.load_tokens()),
                 "local": gpu_available(),
-                "apis": any([current["ideogram"], current["openai"], current["bfl"]]),
+                "apis": any([current.get("openrouter"), current["ideogram"],
+                             current["openai"], current["bfl"]]),
                 "story": bool(current["anthropic"]) or local_llm_reachable(current)
                          or bool(current.get("openrouter")),
                 "video": video.available(current),
@@ -952,6 +1006,13 @@ class Handler(BaseHTTPRequestHandler):
                                      int(payload.get("height", 1024)),
                                      str(payload.get("negative", "")),
                                      family)
+            elif engine == "openrouter-image":
+                if not current.get("openrouter"):
+                    raise RuntimeError("OpenRouter key missing")
+                image = generate_openrouter_image(
+                    prompt, int(payload.get("width", 1024)),
+                    int(payload.get("height", 1024)),
+                    current["openrouter"], str(payload.get("negative", "")))
             elif engine == "ideogram":
                 if not current["ideogram"]:
                     raise RuntimeError("Ideogram key missing")

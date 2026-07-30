@@ -77,6 +77,28 @@ STEP_TIERS = {
     "story": "deep",
 }
 
+# Image models, best first. Not specialists: these are frontier
+# generalists, which for a poster or a page beats a general local
+# checkpoint and, unlike a local checkpoint, works for somebody who has
+# only installed the application. A specialist anime model through fal
+# would still be better for manga panels specifically, and can be added
+# alongside rather than instead.
+IMAGE_MODELS = [
+    "google/gemini-3-pro-image",
+    "openai/gpt-5-image",
+    "google/gemini-2.5-flash-image",
+]
+
+
+def image_model(catalogue: dict | None = None) -> str | None:
+    """The first image model that the provider currently lists."""
+    models = catalogue if catalogue is not None else fetch_catalogue()
+    for identifier in IMAGE_MODELS:
+        if identifier in models:
+            return identifier
+    return IMAGE_MODELS[0] if not models else None
+
+
 _catalogue = {"at": 0.0, "models": {}, "error": None}
 _lock = threading.Lock()
 CATALOGUE_TTL = 3600
