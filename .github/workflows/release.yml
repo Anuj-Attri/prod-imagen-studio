@@ -1,5 +1,15 @@
 name: Release installers
 
+# Two stages on purpose. The builds run in parallel and publish nothing;
+# one job afterwards makes the release and attaches everything.
+#
+# Building and releasing in the same matrix job means every platform races
+# to create the same release. That produced two drafts under one tag, the
+# Windows installer on one and the macOS ones on the other, with both jobs
+# reporting success: nothing failed, the release was simply half of itself
+# in two places. It also breaks self-updating, because the updater reads
+# latest.yml from the release and there were two of them.
+
 on:
   push:
     tags: ["v*"]
@@ -54,15 +64,49 @@ jobs:
           # unsigned builds: signing requires certificates the repo does not hold
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
-      # The .yml and .blockmap files are what electron-updater reads to
-      # discover a new version. Without them the app never self-updates.
-      - name: Attach to draft release
-        uses: softprops/action-gh-release@v2
+      # An installer that was never produced must not pass quietly. The
+      # upload of an empty match counts as success, so a platform that
+      # silently built nothing would reach the release as an absence.
+      - name: Check something installable came out
+        shell: bash
+        working-directory: studio
+        run: |
+          ls -1 dist/ || true
+          found=$(ls -1 dist/*.exe dist/*.dmg dist/*.zip 2>/dev/null | wc -l)
+          echo "installable artifacts: $found"
+          if [ "$found" -eq 0 ]; then
+            echo "::error::${{ matrix.os }} produced no installer"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
         with:
-          draft: true
-          files: |
+          name: installers-${{ matrix.os }}
+          if-no-files-found: error
+          path: |
             studio/dist/*.exe
             studio/dist/*.dmg
             studio/dist/*.zip
             studio/dist/*.blockmap
             studio/dist/latest*.yml
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+
+      - name: Show what will be attached
+        run: ls -lh installers/
+
+      # One job, one release. The .yml and .blockmap files are what
+      # electron-updater reads to find a new version, so they have to sit
+      # on the same release as the installers they describe.
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          fail_on_unmatched_files: true
+          files: installers/*
