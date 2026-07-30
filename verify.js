@@ -214,7 +214,7 @@ function waitForServer(port, timeoutMs) {
 
   step("server compiles", () => python(["-m", "py_compile",
     ...["gen_server.py", "probe.py", "routing.py", "bench.py", "review.py",
-        "limits.py", "video.py", "reference.py"]
+        "limits.py", "video.py", "reference.py", "smoke.py"]
       .map((file) => path.join("server", file))]));
 
   step("renderer self-test", () => node([path.join("studio", "selftest.js")]));

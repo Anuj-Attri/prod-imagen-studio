@@ -4009,6 +4009,11 @@ const NUMBER_WORDS = {
 };
 const CHAPTER_PAGES_DEFAULT = 6;
 
+// Layouts made of pages, as opposed to layouts that are one artwork. A manga
+// chapter and a coloring book are both many pages of the same work; a poster
+// and a greeting card are not, and a page count means something else there.
+const MULTI_PAGE_LAYOUTS = ["panels", "single"];
+
 // How many pages this message asks for, or 0 if it is not asking for a
 // chapter at all. Deliberately narrow: a chat about one page must keep
 // behaving as it does, because the loop below costs an image generation per
@@ -4254,18 +4259,25 @@ async function sendChat(overrideText, quiet) {
 
   // A request for a chapter is planned first, then drawn page by page.
   //
-  // Only for layouts that have pages: a poster is one image, and "a six page
-  // poster" means something else entirely.
-  //
-  // And only for a message somebody typed. The quiet flag is what the
-  // existing page loops pass, and they pass the original brief through again
-  // — which may well be the words "an 8-page chapter". Without this, each
-  // page of a chapter would start a chapter of its own.
+  // Only for a message somebody typed. The quiet flag is what the existing
+  // page loops pass, and they pass the original brief through again — which
+  // may well be the words "an 8-page chapter". Without this, each page of a
+  // chapter would start a chapter of its own.
   const wanted = quiet ? 0 : pagesAskedFor(text);
-  if (wanted && recipe().layout === "panels" && !chapterRunning) {
-    doc.chat.push({ role: "user", content: text });
-    await startChapter(text, wanted);
-    return;
+  if (wanted && !chapterRunning) {
+    // A poster and a greeting card are one artwork, so a page count means
+    // something else there and the request goes through unchanged. Anything
+    // that is made of pages gets the chapter treatment — which used to be
+    // panel comics only, so asking for a twelve page coloring book silently
+    // produced one page and no explanation of why.
+    if (MULTI_PAGE_LAYOUTS.includes(recipe().layout)) {
+      doc.chat.push({ role: "user", content: text });
+      await startChapter(text, wanted);
+      return;
+    }
+    appendMsg("agent", `A ${doc.kind} is a single piece, so "${wanted} pages"`
+      + " does not apply here. Building it as one, and you can add pages"
+      + " yourself from the Pages tab.");
   }
   doc.chat.push({ role: "user", content: text });
   const thinking = appendMsg("agent", "…");

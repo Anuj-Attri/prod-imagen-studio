@@ -477,6 +477,23 @@ app.whenReady().then(() => {
 function offerRecovery() {
   const files = listRecoveries();
   if (!files.length) return;
+
+  // Named, and honest about what comes back with it.
+  //
+  // "A project was not closed properly" gave no way to tell which project, or
+  // that recovering restores the agent conversation along with the pages. So
+  // starting a new project after a bad session looked as though the new
+  // project had inherited the old one's failed prompts, when in fact the old
+  // project had been recovered into a window of its own.
+  const names = files.map((file) => {
+    try {
+      const project = JSON.parse(fs.readFileSync(file, "utf-8"));
+      return String((project.document && project.document.name)
+        || project.name || "Untitled");
+    } catch {
+      return "an unreadable copy";
+    }
+  });
   const choice = dialog.showMessageBoxSync({
     type: "question",
     buttons: files.length === 1 ? ["Recover", "Discard"] : ["Recover all", "Discard"],
@@ -484,9 +501,12 @@ function offerRecovery() {
     cancelId: 1,
     title: "Unsaved work found",
     message: files.length === 1
-      ? "A project was not closed properly."
+      ? `"${names[0]}" was not closed properly.`
       : `${files.length} projects were not closed properly.`,
-    detail: "Recovering reopens the work as it was. Discarding deletes it.",
+    detail: (files.length === 1 ? "" : names.join(", ") + "\n\n")
+      + "Recovering reopens it in its own window, with the pages and the "
+      + "agent conversation as they were. Discarding deletes the copy and "
+      + "leaves you with a clean start.",
   });
   files.forEach((file) => {
     if (choice === 0) {

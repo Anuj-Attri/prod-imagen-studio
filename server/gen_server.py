@@ -38,7 +38,7 @@ HOST = os.environ.get("STUDIO_HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT") or os.environ.get("STUDIO_PORT") or "8787")
 # Reported by /health so a stale server left running on the port is
 # obvious instead of silently serving old code.
-BUILD = "0.6.3"
+BUILD = "0.6.4"
 KEYS_PATH = Path(__file__).with_name("keys.json")
 AUTH_TOKEN = os.environ.get("STUDIO_AUTH_TOKEN")
 
@@ -465,29 +465,73 @@ def llm_chat(current: dict, system: str, messages: list, max_tokens: int = 900,
         step = step or ("story" if max_tokens > 1200 else "beats")
         choice = routing.model_for(step)
         model = choice["model"] or "openai/gpt-5-mini"
-        request = {
-            "model": model,
-            "max_tokens": max_tokens,
-            "messages": [{"role": "system", "content": system}] + messages,
-        }
-        if json_mode:
-            request["response_format"] = {"type": "json_object"}
-        result = http_json(
-            "https://openrouter.ai/api/v1/chat/completions",
-            request,
-            {"Authorization": f"Bearer {current['openrouter']}",
-             "X-Title": "Firestarter"},
-            timeout=180,
-        )
-        message = (result.get("choices") or [{}])[0].get("message") or {}
-        # Strip before choosing. A content field holding only whitespace
-        # is truthy, so picking it discards an answer sitting in the
-        # reasoning field; that mistake threw away a working review once
-        # already.
-        for field in ("content", "reasoning"):
-            candidate = strip_reasoning(str(message.get(field) or "")).strip()
-            if candidate:
-                return candidate
+
+        # An answer that ran out of room is retried with more of it, once.
+        #
+        # This is the failure that made the application look broken. A page of
+        # six panels, each with two or three lines of dialogue, plus the cast
+        # entries, does not fit in 1400 tokens — the reply stopped mid-string
+        # with finish_reason "length", the JSON would not parse, and the
+        # fallback path put the raw truncated text into the chat log as
+        # though the model had said it. So the user saw a wall of broken JSON
+        # beginning {"reply":"Built page 1..." and got no page at all.
+        #
+        # Worse, it was self-inflicted: the dialogue guidance was rewritten to
+        # ask for two to three balloons a panel without ever raising the
+        # ceiling that output had to fit inside. Asking for more while
+        # allowing the same is how a working feature turns into a broken one.
+        #
+        # Retried at the transport, so every caller is covered rather than
+        # whichever one is remembered.
+        attempts = [max_tokens, min(max_tokens * 3, 16000)]
+        last = ""
+        for index, budget in enumerate(attempts):
+            request = {
+                "model": model,
+                "max_tokens": budget,
+                "messages": [{"role": "system", "content": system}] + messages,
+            }
+            if json_mode:
+                request["response_format"] = {"type": "json_object"}
+            result = http_json(
+                "https://openrouter.ai/api/v1/chat/completions",
+                request,
+                {"Authorization": f"Bearer {current['openrouter']}",
+                 "X-Title": "Firestarter"},
+                timeout=300,
+            )
+            choice_out = (result.get("choices") or [{}])[0]
+            message = choice_out.get("message") or {}
+            # Strip before choosing. A content field holding only whitespace
+            # is truthy, so picking it discards an answer sitting in the
+            # reasoning field; that mistake threw away a working review once
+            # already.
+            answer = ""
+            for field in ("content", "reasoning"):
+                candidate = strip_reasoning(str(message.get(field) or "")).strip()
+                if candidate:
+                    answer = candidate
+                    break
+
+            cut_off = choice_out.get("finish_reason") == "length"
+            if answer and not cut_off:
+                return answer
+            last = answer or last
+            # Empty for some reason other than running out of room. Asking
+            # again with a bigger budget cannot fix that.
+            if not cut_off:
+                break
+        if last and json_mode:
+            # Still truncated after the larger budget. Said plainly, because
+            # handing a half-finished object to a parser produces a message
+            # about delimiters that means nothing to anybody.
+            raise RuntimeError(
+                f"{model} ran out of room before finishing the answer, even "
+                f"at {attempts[-1]} tokens. Ask for fewer panels on this "
+                f"page."
+            )
+        if last:
+            return last
         raise RuntimeError(
             f"{model} replied without an answer. Send it again, or name a "
             f"different model for this step in server/routing.py."
@@ -737,11 +781,31 @@ def parse_agent_json(text: str) -> dict:
                     "cast": as_list("cast"),
                     "nodes": as_list("nodes"),
                     "edges": as_list("edges"),
+                    "unparsed": False,
                 }
         except Exception:
             pass
-    # model ignored the contract: degrade to a plain text reply
-    return {"reply": text, "panels": [], "cast": [], "nodes": [], "edges": []}
+    # The contract was not met. Flagged rather than passed off as something
+    # the agent said: this branch used to return the raw text as the reply,
+    # which meant a truncated object went into the chat log verbatim and the
+    # user read half a JSON document where an answer should have been.
+    return {"reply": text, "panels": [], "cast": [], "nodes": [], "edges": [],
+            "unparsed": True}
+
+
+def page_token_budget(panels: int) -> int:
+    """How much room a page of this many panels needs to come back whole.
+
+    A named function rather than an expression inside agent_chat, so the
+    check for it can measure the real thing instead of a copy of the
+    formula that would keep passing after the real one changed.
+
+    A flat 1400 was what shipped, and a six panel page with two or three
+    balloons each does not fit in it: the reply stopped mid-string, the JSON
+    would not parse, and the chat log filled with broken text while the page
+    stayed empty.
+    """
+    return min(1200 + 520 * max(1, panels), 12000)
 
 
 def agent_chat(payload: dict, current: dict) -> dict:
@@ -811,19 +875,28 @@ def agent_chat(payload: dict, current: dict) -> dict:
     if wanted_panels:
         system += (f" This page has exactly {wanted_panels} panels. Not more,"
                    f" not fewer.")
+    # Room enough for the page that was actually asked for.
+    #
+    # A flat 1400 was fine for terse panels and nowhere near enough once the
+    # dialogue guidance started asking for two or three balloons each: a six
+    # panel page needs the cast list, six prompts and up to eighteen lines of
+    # speech, and it stopped mid-string every time. Budgeted from the number
+    # of panels instead, so the ceiling grows with the request rather than
+    # being a number that happened to be enough once.
+    page_budget = page_token_budget(wanted_panels or 6)
     result = parse_agent_json(llm_chat(current, system, messages,
-                                       max_tokens=1400, json_mode=True))
+                                       max_tokens=page_budget, json_mode=True))
     # A diagram project that came back as comic panels means the model
     # dropped the contract; ask once more before giving up on it.
     if layout == "blueprint" and not result.get("nodes"):
         result = parse_agent_json(llm_chat(
             current, system, messages + [{"role": "user", "content": DIAGRAM_HINT}],
-            max_tokens=1400, json_mode=True))
+            max_tokens=page_budget, json_mode=True))
     if layout != "blueprint" and not result["panels"] and looks_like_build_request(messages):
         # the model lapsed into prose: demand the page once more
         result = parse_agent_json(llm_chat(
             current, system, messages + [{"role": "user", "content": BUILD_HINT}],
-            max_tokens=1400, json_mode=True))
+            max_tokens=page_budget, json_mode=True))
     panels = []
     for panel in result["panels"][:(wanted_panels or 8)]:
         if not isinstance(panel, dict) or not panel.get("prompt"):
@@ -887,6 +960,25 @@ def agent_chat(payload: dict, current: dict) -> dict:
         reply = f"Built a {len(panels)} panel page."
     if nodes and not reply:
         reply = f"Diagram with {len(nodes)} components."
+
+    # Whatever goes out is something a person can read.
+    #
+    # Two things used to escape into the chat log. A reply that failed to
+    # parse was sent verbatim, so a truncated object arrived as a wall of
+    # {"reply":"Built page 1...","cast":[{"name":"Kade". And a reasoning model
+    # that spent its budget thinking returned that thinking instead of an
+    # answer, so the log filled with "**Planning panel setup** I need to
+    # create a page with 2 to 6 panels". Neither is a message; both looked
+    # like the application talking nonsense to itself, because that is
+    # exactly what it was doing.
+    if result.get("unparsed") or reply.lstrip().startswith(("{", "[")) \
+            or reply.lstrip().startswith("**"):
+        reply = ("The model did not answer in the form this expects, so "
+                 "nothing was built. Send it again — it usually works on the "
+                 "second try.")
+        if panels:
+            reply = f"Built a {len(panels)} panel page."
+
     return {"reply": reply, "panels": panels, "cast": cast,
             "nodes": nodes, "edges": edges}
 

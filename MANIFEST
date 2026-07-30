@@ -22,6 +22,7 @@ server/gen_server.py
 server/keys.example.json
 server/limits.py
 server/probe.py
+server/smoke.py
 server/reference.py
 server/review.py
 server/routing.py
