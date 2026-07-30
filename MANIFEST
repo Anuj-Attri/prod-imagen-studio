@@ -3,6 +3,7 @@
 # published repository, or an installer, by accident.
 .github/workflows/ci.yml
 .github/workflows/release.yml
+.github/workflows/review.yml
 .gitignore
 LICENSE
 MANIFEST
@@ -15,6 +16,7 @@ server/bench.py
 server/gen_server.py
 server/keys.example.json
 server/probe.py
+server/review.py
 server/routing.py
 start-studio.cmd
 start-studio.sh

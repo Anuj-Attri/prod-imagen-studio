@@ -293,10 +293,13 @@ ipcMain.handle("export-pdf", async (_e, { suggestedName, widthIn, heightIn, imag
   // the finding never made it back into the code it was about.
   const scratch = path.join(app.getPath("temp"),
     `studio-pdf-${Date.now()}-${process.pid}.html`);
-  await fs.promises.writeFile(scratch, html, "utf-8");
 
-  const sheet = new BrowserWindow({ show: false, webPreferences: { offscreen: true } });
+  let sheet = null;
   try {
+    // Written inside the guarded block, so that failing to open the
+    // window cannot leave the document behind in the temporary folder.
+    await fs.promises.writeFile(scratch, html, "utf-8");
+    sheet = new BrowserWindow({ show: false, webPreferences: { offscreen: true } });
     await sheet.loadFile(scratch);
     const pdf = await sheet.webContents.printToPDF({
       printBackground: true,
@@ -314,7 +317,7 @@ ipcMain.handle("export-pdf", async (_e, { suggestedName, widthIn, heightIn, imag
     await fs.promises.writeFile(result.filePath, pdf);
     return result.filePath;
   } finally {
-    sheet.destroy();
+    if (sheet) sheet.destroy();
     fs.promises.unlink(scratch).catch(() => {});
   }
 });

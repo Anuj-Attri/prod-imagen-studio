@@ -1,0 +1,73 @@
+name: Review
+
+# Reads the change on a pull request and comments what is wrong with it.
+# The checks in ci.yml decide whether a change is allowed to merge; this
+# only advises, so it never fails the run. A review that can block the
+# build teaches people to ignore reviews.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  # A new push replaces the review in flight rather than queueing behind
+  # it, so the comment always describes the current state of the branch.
+  group: review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # both ends of the comparison are needed to produce the diff
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Collect the change
+        run: |
+          git diff --no-color \
+            "origin/${{ github.event.pull_request.base.ref }}...HEAD" \
+            -- . ':(exclude)studio/package-lock.json' > change.patch
+          echo "changed $(git diff --name-only \
+            "origin/${{ github.event.pull_request.base.ref }}...HEAD" | wc -l) files, \
+            $(wc -l < change.patch) diff lines"
+
+      - name: Review it
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: python -m server.review --diff change.patch --out review.md
+
+      - name: Say so on the pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "## Automated review"
+            echo
+            cat review.md
+            echo
+            echo "<sub>Advisory only. \`node verify.js\` in CI decides what merges."
+            echo "Re-runs on every push to this branch.</sub>"
+          } > comment.md
+          # One comment per branch, edited in place: a fresh comment on
+          # every push buries the conversation under stale reviews.
+          existing=$(gh pr view "${{ github.event.pull_request.number }}" \
+            --json comments \
+            --jq '.comments[] | select(.body | startswith("## Automated review")) | .url' \
+            | tail -1)
+          if [ -n "$existing" ]; then
+            gh pr comment "${{ github.event.pull_request.number }}" \
+              --body-file comment.md --edit-last || \
+            gh pr comment "${{ github.event.pull_request.number }}" --body-file comment.md
+          else
+            gh pr comment "${{ github.event.pull_request.number }}" --body-file comment.md
+          fi
