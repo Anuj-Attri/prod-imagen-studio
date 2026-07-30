@@ -36,3 +36,6 @@ bench-output/
 
 # a contact sheet for eyeballing the icon, not a source file
 build/icon-preview.png
+
+# generated candidates: the chosen one is committed as mark-source.png
+build/candidates/

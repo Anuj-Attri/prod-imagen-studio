@@ -11,6 +11,9 @@ README.md
 build/icon.ico
 build/icon.png
 build/make-icon.py
+build/make-mark.py
+build/mark-source.png
+build/mark.png
 docker-compose.yml
 render.yaml
 server/Dockerfile
