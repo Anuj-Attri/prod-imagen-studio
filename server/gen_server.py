@@ -38,7 +38,7 @@ HOST = os.environ.get("STUDIO_HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT") or os.environ.get("STUDIO_PORT") or "8787")
 # Reported by /health so a stale server left running on the port is
 # obvious instead of silently serving old code.
-BUILD = "0.5.1"
+BUILD = "0.5.2"
 KEYS_PATH = Path(__file__).with_name("keys.json")
 AUTH_TOKEN = os.environ.get("STUDIO_AUTH_TOKEN")
 

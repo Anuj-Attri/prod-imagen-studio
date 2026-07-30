@@ -72,9 +72,16 @@ jobs:
         working-directory: studio
         run: |
           ls -1 dist/ || true
-          found=$(ls -1 dist/*.exe dist/*.dmg dist/*.zip 2>/dev/null | wc -l)
-          echo "installable artifacts: $found"
-          if [ "$found" -eq 0 ]; then
+          # Counted with a glob rather than by asking ls, because a glob
+          # that matches nothing makes ls exit non-zero, and under
+          # pipefail that failure ends the step. The first version of this
+          # check used ls and so failed on every platform: on macOS for the
+          # absent .exe, on Windows for the absent .dmg, while the
+          # installers it was looking for sat in the listing above it.
+          shopt -s nullglob
+          built=(dist/*.exe dist/*.dmg dist/*.zip)
+          echo "installable artifacts: ${#built[@]}"
+          if [ ${#built[@]} -eq 0 ]; then
             echo "::error::${{ matrix.os }} produced no installer"
             exit 1
           fi
