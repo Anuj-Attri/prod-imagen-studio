@@ -58,6 +58,26 @@ function python(args) {
   execFileSync(exe, args, { cwd: root, stdio: "pipe", encoding: "utf-8" });
 }
 
+/* The first string argument of every call to `name` in some source.
+
+   Written with plain string work rather than a regular expression on
+   purpose. Building patterns like this through a shell heredoc mangled the
+   escapes four separate times today, each time producing a pattern that
+   was merely wrong rather than one that failed to compile. Splitting on
+   the call is duller and cannot be misquoted. */
+function argumentsOf(source, name) {
+  const found = [];
+  const parts = source.split(name + "(");
+  for (const part of parts.slice(1)) {
+    const trimmed = part.replace(/^\s+/, "");
+    const quote = trimmed[0];
+    if (quote !== '"' && quote !== "'" && quote !== "`") continue;
+    const end = trimmed.indexOf(quote, 1);
+    if (end > 1) found.push(trimmed.slice(1, end));
+  }
+  return found;
+}
+
 // A port the operating system says is free right now. Checking used to
 // assume the usual one was idle, so running it while the application was
 // open left the checking server unable to bind: the probe then talked to
@@ -126,6 +146,46 @@ function waitForServer(port, timeoutMs) {
   // Every server module, not a chosen two: routing, the bench and the
   // reviewer were added later and were going unchecked, so a syntax
   // error in any of them would have reached a build machine untouched.
+  /* A preload runs sandboxed, where the only module it may require is
+     electron. Requiring anything else does not degrade: it throws while
+     loading, so the whole bridge is discarded, window.studio is undefined,
+     and the first button pressed in the application dies. That happened,
+     and none of the renderer checks noticed, because they run in a plain
+     browser where there is no preload to break. Cheap to check statically,
+     and the only place it can be caught before somebody installs it. */
+  step("the preload requires nothing a sandbox lacks", () => {
+    const source = fs.readFileSync(path.join(root, "studio", "preload.js"), "utf-8");
+    const asked = argumentsOf(source, "require");
+    const forbidden = asked.filter((name) => name !== "electron");
+    if (forbidden.length) {
+      throw new Error("a sandboxed preload cannot require: "
+        + forbidden.join(", ") + ". Read the file in main.js and pass it "
+        + "through webPreferences.additionalArguments instead.");
+    }
+    if (!asked.includes("electron")) {
+      throw new Error("the preload requires nothing at all, so it cannot "
+        + "be exposing a bridge");
+    }
+  });
+
+  // Every channel the renderer asks for must exist in the main process,
+  // and the reverse: a mismatch is a button that throws when pressed.
+  step("every bridge channel has a handler", () => {
+    const preload = fs.readFileSync(path.join(root, "studio", "preload.js"), "utf-8");
+    const main = fs.readFileSync(path.join(root, "studio", "main.js"), "utf-8");
+    const invoked = argumentsOf(preload, "ipcRenderer.invoke");
+    const sent = argumentsOf(preload, "ipcRenderer.send");
+    const handled = argumentsOf(main, "ipcMain.handle");
+    const listened = argumentsOf(main, "ipcMain.on");
+
+    const missing = invoked.filter((c) => !handled.includes(c))
+      .concat(sent.filter((c) => !listened.includes(c)));
+    if (missing.length) {
+      throw new Error("the renderer asks for channels nothing answers: "
+        + missing.join(", "));
+    }
+  });
+
   step("server compiles", () => python(["-m", "py_compile",
     ...["gen_server.py", "probe.py", "routing.py", "bench.py", "review.py",
         "limits.py", "video.py"]

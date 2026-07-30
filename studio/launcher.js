@@ -38,7 +38,14 @@ document.querySelectorAll(".kind").forEach((chip) => {
 });
 
 document.getElementById("create").addEventListener("click", () => {
-  if (mode === "video") return alert("Video projects arrive in phase 2. Start with an Image project.");
+  if (mode === "video") {
+    // Video generation is built and switched off, not absent. Saying which
+    // it is matters: one is something to configure, the other is something
+    // to wait for.
+    return alert("Video needs a fal or Replicate key on the server, which "
+      + "bills by the second of output. Until one is set, start with an "
+      + "Image project.");
+  }
   window.studio.openProject({
     name: document.getElementById("project-name").value.trim() || "Untitled",
     mode, kind, created: new Date().toISOString(),

@@ -22,6 +22,27 @@ function listRecoveries() {
 // can ask rather than discard an afternoon of it.
 const unsaved = new Map();
 
+/* Which backend this build points at, read once here.
+
+   Passed to every window on the command line rather than read in the
+   preload or the renderer. Neither of those can read a file: the renderer
+   has no node access, and a preload runs sandboxed where requiring fs
+   throws and takes the whole bridge down with it. The main process can,
+   and process.argv reaches a sandbox intact. */
+function deploymentArgument() {
+  try {
+    const raw = fs.readFileSync(
+      path.join(__dirname, "deployment.json"), "utf-8");
+    const parsed = JSON.parse(raw);
+    return `--firestarter-deployment=${JSON.stringify({
+      server: parsed.server || "",
+      signup: parsed.signup || "",
+    })}`;
+  } catch (_) {
+    return "--firestarter-deployment={}";
+  }
+}
+
 const frameless = {
   frame: false,
   backgroundColor: "#0b0a0e",
@@ -29,6 +50,7 @@ const frameless = {
     preload: path.join(__dirname, "preload.js"),
     nodeIntegration: false,
     contextIsolation: true,
+    additionalArguments: [deploymentArgument()],
   },
 };
 

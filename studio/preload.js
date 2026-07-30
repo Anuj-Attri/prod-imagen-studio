@@ -1,21 +1,24 @@
 const { contextBridge, ipcRenderer } = require("electron");
-const fs = require("fs");
-const path = require("path");
 
 /* The deployed backend this build points at.
 
-   Read here rather than in the renderer. The renderer has no node access,
-   so a require of the json there silently failed in a packaged copy: the
-   baked url never loaded, the address fell back to this machine, and a
-   fresh install reported the server offline while a perfectly good one was
-   running. Preload can read files, and this is exactly what it is for.
+   Handed in on the command line by the main process rather than read from
+   disk here. A preload runs sandboxed, where the only module available is
+   electron: requiring fs threw "module not found", which does not fail
+   quietly at all but takes the entire bridge with it. Every function below
+   vanished, window.studio was undefined, and the first button pressed in
+   the launcher threw. Reading a file was the wrong instinct twice over,
+   first in the renderer and then here.
 
-   Read synchronously because the renderer decides its server address as it
-   starts, before anything asynchronous could have answered. */
+   process.argv is available in a sandbox, so main passes the json through
+   it, which is also synchronous: the renderer picks its server address as
+   it starts and could not wait for a message. */
 function deployment() {
+  const flag = "--firestarter-deployment=";
+  const found = (process.argv || []).find((arg) => arg.startsWith(flag));
+  if (!found) return {};
   try {
-    return JSON.parse(
-      fs.readFileSync(path.join(__dirname, "deployment.json"), "utf-8"));
+    return JSON.parse(found.slice(flag.length));
   } catch (_) {
     return {};
   }
