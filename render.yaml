@@ -1,0 +1,57 @@
+# Firestarter backend, on Render's free tier.
+#
+# One always-listening container, which is why this was chosen over a
+# serverless host: the request limits in server/limits.py count in memory,
+# and that only works when there is one process to count in. On a
+# serverless platform each invocation may start fresh, so the limits would
+# reset unpredictably and protect nothing.
+#
+# The cost of that choice is a cold start. A free service sleeps after
+# fifteen minutes idle and takes thirty to sixty seconds to wake, so the
+# application says it is waking rather than looking broken.
+#
+# Deploy:  push this file, then in Render choose New > Blueprint and point
+# it at the repository. Set the two secrets below in the dashboard; they
+# are deliberately not in this file.
+
+services:
+  - type: web
+    name: firestarter-backend
+    runtime: docker
+    dockerfilePath: ./server/Dockerfile
+    dockerContext: ./server
+    plan: free
+    region: oregon          # change to the one nearest you; fixed at creation
+    healthCheckPath: /health
+    autoDeploy: true
+
+    envVars:
+      # Listens on every interface: the platform reaches the container
+      # from outside, so binding to localhost would refuse every request.
+      - key: STUDIO_HOST
+        value: 0.0.0.0
+
+      # Paid for by whoever owns this deployment, which is the reason the
+      # limits below exist at all.
+      - key: OPENROUTER_API_KEY
+        sync: false         # set in the dashboard, never committed
+
+      # Who may call, as "token:name" pairs. One per person, so that a
+      # token which leaks can be withdrawn without disturbing anybody
+      # else. Generate them with:  python -c "import secrets;
+      # print(secrets.token_urlsafe(24))"
+      - key: STUDIO_TOKENS
+        sync: false
+
+      # Generous enough that ordinary work never notices them, mean enough
+      # that a leaked token cannot empty an account overnight.
+      - key: STUDIO_PER_MINUTE
+        value: "20"
+      - key: STUDIO_PER_DAY
+        value: "400"
+
+      # Image and video generation need their own keys and stay switched
+      # off without them. There is no GPU here, so nothing renders
+      # locally on this box by design.
+      - key: FAL_KEY
+        sync: false

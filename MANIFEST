@@ -11,6 +11,7 @@ README.md
 build/icon.ico
 build/icon.png
 docker-compose.yml
+render.yaml
 server/Dockerfile
 server/bench.py
 server/gen_server.py

@@ -1802,6 +1802,68 @@ check("asking for another take still gives a different one", () => {
     : "another take reproduced the same art";
 });
 
+check("a slow hosted server says it is waking, and stops when it answers", async () => {
+  // Free hosting sleeps and takes most of a minute to wake. Unsaid, the
+  // first action of a session reads as a broken application rather than a
+  // waiting one. The delay is shortened here rather than waited out: the
+  // page gets a few seconds of virtual time in total.
+  resetForCheck("manga");
+  const notice = document.getElementById("waking");
+  if (!notice) return "there is no waking notice in the page";
+  notice.classList.remove("show");
+
+  const realFetch = window.fetch;
+  const realServer = SERVER;
+  const realDelay = WAKING_AFTER_MS;
+  WAKING_AFTER_MS = 20;
+  SERVER = "https://example.invalid";
+  let release = null;
+  window.fetch = () => new Promise((resolve) => { release = resolve; });
+  try {
+    const inFlight = api("/health");
+    await new Promise((r) => setTimeout(r, 80));
+    if (!notice.classList.contains("show")) {
+      return "a call slower than the delay said nothing";
+    }
+    release({ ok: true, json: async () => ({}) });
+    await inFlight;
+    if (notice.classList.contains("show")) {
+      return "the notice stayed up after the server answered";
+    }
+  } finally {
+    window.fetch = realFetch;
+    SERVER = realServer;
+    WAKING_AFTER_MS = realDelay;
+  }
+  return true;
+});
+
+check("a server on this machine is never described as waking", async () => {
+  resetForCheck("manga");
+  const notice = document.getElementById("waking");
+  notice.classList.remove("show");
+  const realFetch = window.fetch;
+  const realServer = SERVER;
+  const realDelay = WAKING_AFTER_MS;
+  WAKING_AFTER_MS = 20;
+  SERVER = "http://127.0.0.1:8787";
+  let release = null;
+  window.fetch = () => new Promise((resolve) => { release = resolve; });
+  try {
+    const inFlight = api("/health");
+    await new Promise((r) => setTimeout(r, 80));
+    const said = notice.classList.contains("show");
+    release({ ok: true, json: async () => ({}) });
+    await inFlight;
+    if (said) return "a local server was described as waking up";
+  } finally {
+    window.fetch = realFetch;
+    SERVER = realServer;
+    WAKING_AFTER_MS = realDelay;
+  }
+  return true;
+});
+
 check("right clicking the canvas actually opens the menu", () => {
   // The existing check called the menu's actions directly, so it proved
   // the actions work and never proved the menu opens. Reported broken

@@ -30,7 +30,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 HOST = os.environ.get("STUDIO_HOST", "127.0.0.1")
-PORT = int(os.environ.get("STUDIO_PORT", "8787"))
+# PORT first, because that is the name a hosting platform sets and it is
+# not negotiable there: bind anything else and the deployment is marked
+# unhealthy without ever having been reached. STUDIO_PORT stays for local
+# use and for the checks, which claim a free port so a run cannot collide
+# with a server the developer already has open.
+PORT = int(os.environ.get("PORT") or os.environ.get("STUDIO_PORT") or "8787")
 # Reported by /health so a stale server left running on the port is
 # obvious instead of silently serving old code.
 BUILD = "0.4.0"

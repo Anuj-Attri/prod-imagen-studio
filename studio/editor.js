@@ -32,11 +32,48 @@ let SERVER = localStorage.getItem("studio-server")
   || "http://127.0.0.1:8787";
 let SERVER_TOKEN = localStorage.getItem("studio-token") || "";
 
+/* Every call to the backend, and a word about the slow ones.
+
+   A hosted backend on a free plan sleeps once nobody has used it for a
+   while and takes most of a minute to wake. Unsaid, the first action of a
+   session simply hangs, and the application looks broken when it is only
+   waiting. Anything still unanswered after a few seconds explains itself
+   and stops as soon as a reply arrives. A server on this machine answers
+   long before the message would ever appear. */
+// Not a constant so a check can shorten it. The suite runs the page under
+// a few seconds of virtual time in total, so a check that actually waited
+// four of them would bring the whole run down; that mistake has been made
+// here once already.
+let WAKING_AFTER_MS = 4000;
+let wakingCalls = 0;
+
+function showWaking(show) {
+  const box = document.getElementById("waking");
+  if (box) box.classList.toggle("show", Boolean(show));
+}
+
 function api(path, options) {
   const settings = options || {};
   const headers = { ...(settings.headers || {}) };
   if (SERVER_TOKEN) headers.Authorization = "Bearer " + SERVER_TOKEN;
-  return fetch(SERVER.replace(/\/+$/, "") + path, { ...settings, headers });
+  const remote = !/127\.0\.0\.1|localhost/.test(SERVER);
+
+  let timer = null;
+  if (remote) {
+    wakingCalls += 1;
+    timer = setTimeout(() => showWaking(true), WAKING_AFTER_MS);
+  }
+  const settled = () => {
+    if (!remote) return;
+    clearTimeout(timer);
+    wakingCalls = Math.max(0, wakingCalls - 1);
+    // Only once nothing else is still waiting. A page of panels would
+    // otherwise flicker the message on and off as each one lands.
+    if (wakingCalls === 0) showWaking(false);
+  };
+  return fetch(SERVER.replace(/\/+$/, "") + path, { ...settings, headers })
+    .then((response) => { settled(); return response; },
+          (error) => { settled(); throw error; });
 }
 
 // Outside Electron (a browser, a test harness) the preload bridge does
