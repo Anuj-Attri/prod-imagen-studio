@@ -332,14 +332,38 @@ ipcMain.handle("write-png", async (_e, filePath, dataUrl) => {
   return true;
 });
 
+/* Where keys live.
+
+   Running from source they belong beside the server that reads them.
+   Installed, that path is inside the application bundle, which is read
+   only: writing there threw, the reply to the renderer rejected, and the
+   await in the settings dialog abandoned the rest of its work. Saving
+   appeared to do nothing at all, because the modal never got as far as
+   closing.
+
+   Installed copies therefore write to the per-user data folder, which is
+   writable and survives an update. */
+function keysPath() {
+  if (!app.isPackaged) {
+    return path.join(__dirname, "..", "server", "keys.json");
+  }
+  return path.join(app.getPath("userData"), "keys.json");
+}
+
 ipcMain.handle("save-keys", async (_e, data) => {
-  const keysPath = path.join(__dirname, "..", "server", "keys.json");
-  fs.writeFileSync(keysPath, JSON.stringify(data, null, 2), "utf-8");
-  return true;
+  const target = keysPath();
+  try {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, JSON.stringify(data, null, 2), "utf-8");
+    return { ok: true, path: target };
+  } catch (error) {
+    // Reported rather than thrown: the caller has other things to save and
+    // must not lose them because this one failed.
+    return { ok: false, error: String(error) };
+  }
 });
 ipcMain.handle("load-keys", async () => {
-  const keysPath = path.join(__dirname, "..", "server", "keys.json");
-  try { return JSON.parse(fs.readFileSync(keysPath, "utf-8")); } catch { return {}; }
+  try { return JSON.parse(fs.readFileSync(keysPath(), "utf-8")); } catch { return {}; }
 });
 
 /* Tell the windows about an update, rather than the operating system.

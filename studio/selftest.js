@@ -1910,6 +1910,66 @@ check("the fire theme actually restyles the window", () => {
     : "fire and dark share the same accent, so nothing would look different";
 });
 
+check("saving settings still saves the server when a key cannot be written", async () => {
+  // The reported fault. Installed, the keys file sits inside a read-only
+  // bundle, so writing threw, the await abandoned everything after it, and
+  // the dialog neither saved the address nor closed. It read as a dead
+  // button. Nothing had ever pressed it in a check.
+  resetForCheck("manga");
+  const realSave = window.studio.saveKeys;
+  const realServer = SERVER;
+  const realToken = SERVER_TOKEN;
+  window.studio.saveKeys = async () => ({ ok: false, error: "read-only" });
+
+  document.getElementById("key-server").value = "https://example.test";
+  document.getElementById("key-server-token").value = "a-token";
+  try {
+    await document.getElementById("settings-save").onclick();
+    if (SERVER !== "https://example.test") {
+      return "a failed key write also lost the server address: " + SERVER;
+    }
+    if (SERVER_TOKEN !== "a-token") return "the token was lost too";
+    const modal = document.getElementById("settings-modal");
+    if (modal && modal.style.display !== "none") {
+      return "the dialog stayed open, which is what looked like a dead button";
+    }
+  } finally {
+    window.studio.saveKeys = realSave;
+    SERVER = realServer;
+    SERVER_TOKEN = realToken;
+    document.getElementById("key-server").value = "";
+    document.getElementById("key-server-token").value = "";
+    localStorage.removeItem("studio-server");
+    localStorage.removeItem("studio-token");
+  }
+  return true;
+});
+
+check("an empty server field means the address this build ships with", async () => {
+  // Not this machine. A blank field used to fall straight to localhost,
+  // which threw away the deployed address the build was pointed at and
+  // reported the server offline on a fresh install.
+  resetForCheck("manga");
+  const realSave = window.studio.saveKeys;
+  const realServer = SERVER;
+  const shipped = DEPLOYMENT.server;
+  DEPLOYMENT.server = "https://shipped.example";
+  window.studio.saveKeys = async () => ({ ok: true });
+  document.getElementById("key-server").value = "";
+  try {
+    await document.getElementById("settings-save").onclick();
+    if (SERVER !== "https://shipped.example") {
+      return "a blank field resolved to " + SERVER;
+    }
+  } finally {
+    window.studio.saveKeys = realSave;
+    SERVER = realServer;
+    DEPLOYMENT.server = shipped;
+    localStorage.removeItem("studio-server");
+  }
+  return true;
+});
+
 check("right clicking the canvas actually opens the menu", () => {
   // The existing check called the menu's actions directly, so it proved
   // the actions work and never proved the menu opens. Reported broken

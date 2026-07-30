@@ -17,15 +17,14 @@
    The url is baked in because it is public. The token is not: it is
    asked for on first run, so each person has their own and one leaking
    is something to revoke rather than a reason to rebuild. */
+// Handed over by the preload bridge, which can read files where the
+// renderer cannot. The first version of this used require() here, which
+// works when a page is opened from a checkout and silently fails in a
+// packaged copy: the baked address never loaded and a fresh install
+// reported the server offline with a working one deployed.
 let DEPLOYMENT = { server: "", signup: "" };
-try {
-  // eslint-disable-next-line
-  DEPLOYMENT = { ...DEPLOYMENT, ...require("./deployment.json") };
-} catch (_) {
-  try {
-    const el = document.getElementById("deployment");
-    if (el) DEPLOYMENT = { ...DEPLOYMENT, ...JSON.parse(el.textContent || "{}") };
-  } catch (__) { /* shipped without one; local it is */ }
+if (window.studio && window.studio.deployment) {
+  DEPLOYMENT = { ...DEPLOYMENT, ...window.studio.deployment };
 }
 let SERVER = localStorage.getItem("studio-server")
   || DEPLOYMENT.server
@@ -4017,7 +4016,10 @@ document.getElementById("settings-btn").onclick = async () => {
 };
 document.getElementById("settings-cancel").onclick = () => { settingsModal.style.display = "none"; };
 document.getElementById("settings-save").onclick = async () => {
-  await window.studio.saveKeys({
+  // Each part saved on its own. Awaiting a call that rejects abandoned
+  // everything after it, so a key that could not be written also lost the
+  // server address and left the dialog open, looking like a dead button.
+  const written = await window.studio.saveKeys({
     anthropic: document.getElementById("key-anthropic").value.trim(),
     ideogram: document.getElementById("key-ideogram").value.trim(),
     openai: document.getElementById("key-openai").value.trim(),
@@ -4029,10 +4031,16 @@ document.getElementById("settings-save").onclick = async () => {
   const token = document.getElementById("key-server-token").value.trim();
   localStorage.setItem("studio-server", address);
   localStorage.setItem("studio-token", token);
-  SERVER = address || "http://127.0.0.1:8787";
+  // The same order as at start up. Leaving the field blank should mean
+  // "use whatever this build ships with", not "use this machine".
+  SERVER = address || DEPLOYMENT.server || "http://127.0.0.1:8787";
   SERVER_TOKEN = token;
   settingsModal.style.display = "none";
-  toast("Saved. Engines refresh in a few seconds.");
+  if (written && written.ok === false) {
+    toast("Saved, but the keys file could not be written", true);
+  } else {
+    toast("Saved. Engines refresh in a few seconds.");
+  }
   loadEngines();
 };
 
