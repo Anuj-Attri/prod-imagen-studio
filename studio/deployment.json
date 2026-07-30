@@ -1,5 +1,5 @@
 {
   "_comment": "Where a shipped copy looks for its backend. The url is public information and is baked into the build; the token is not, and is asked for on first run so that each person has their own and a leak can be revoked without rebuilding.",
-  "server": "",
-  "signup": ""
+  "server": "https://firestarter-backend.onrender.com",
+  "signup": "Ask Anuj for an access token."
 }
