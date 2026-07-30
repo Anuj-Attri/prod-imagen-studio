@@ -1,6 +1,6 @@
 {
   "name": "firestarter",
-  "version": "0.5.5",
+  "version": "0.6.0",
   "description": "Layered canvas studio for visual stories: manga, anime, posters, diagrams",
   "main": "main.js",
   "author": "Anuj Attri",

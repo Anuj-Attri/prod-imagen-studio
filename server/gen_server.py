@@ -25,7 +25,7 @@ import time
 import urllib.error
 import urllib.request
 
-from . import limits, routing, video
+from . import limits, reference, routing, video
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -38,7 +38,7 @@ HOST = os.environ.get("STUDIO_HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT") or os.environ.get("STUDIO_PORT") or "8787")
 # Reported by /health so a stale server left running on the port is
 # obvious instead of silently serving old code.
-BUILD = "0.5.5"
+BUILD = "0.6.0"
 KEYS_PATH = Path(__file__).with_name("keys.json")
 AUTH_TOKEN = os.environ.get("STUDIO_AUTH_TOKEN")
 
@@ -541,7 +541,9 @@ AGENT_SYSTEM = (
     '{"reply": "at most 15 words", "cast": [{"name": "Rin", "tags": '
     '"1girl, long black hair, red kimono, scar on cheek"}], "panels": '
     '[{"prompt": "art tags for the shot", "cast": ["Rin"], "dialogue": '
-    '[{"kind": "balloon", "text": "SHORT line", "speaker": "left"}]}]}. '
+    '[{"kind": "balloon", "text": "a real spoken line, usually 8 to 30 '
+    'words", "speaker": "left"}, {"kind": "balloon", "text": "the reply, '
+    'or the same speaker continuing", "speaker": "right"}]}]}. '
     "The application places every panel on the page for you: never "
     "output coordinates, sizes, panel numbers or layout instructions. "
     "Panel order is reading order. "
@@ -579,6 +581,16 @@ AGENT_SYSTEM = (
     "the image; the words go in the dialogue list, which the app draws "
     "as real text. dialogue kind is balloon, caption or sfx; speaker is "
     "left or right. sfx is one or two loud words. "
+    "Write the scene as it would actually be scripted. Most panels of a "
+    "conversation carry two or three balloons, not one: people interrupt, "
+    "answer, evade, repeat themselves and talk past each other. A page of "
+    "single-line panels reads as a storyboard rather than a comic, and a "
+    "page where nobody says anything for six panels reads as an art book. "
+    "A balloon of fifteen to thirty words is normal; a whole page of "
+    "four-word lines is not. Let a character finish a thought across two "
+    "balloons in the same panel when that is how they would say it. "
+    "Reserve wordless panels for the ones that are carrying weight, and "
+    "make sure something in the story changes in them. "
     "If the context carries a story_so_far, this work already has a "
     "narrative: continue it rather than restarting, keep established "
     "facts intact, and do not contradict anything already on the pages. "
@@ -954,6 +966,36 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/generate":
             self._generate(payload)
+        elif self.path == "/reference/style":
+            name = str(payload.get("name", "")).strip()
+            if not name:
+                self._json(400, {"error": "a name to research is required"})
+                return
+            if not current.get("openrouter"):
+                self._json(400, {"error": "researching a style needs an "
+                                          "OpenRouter key"})
+                return
+            try:
+                self._json(200, {"ok": True, **reference.style_from_name(
+                    name, current["openrouter"])})
+            except Exception as error:
+                self._json(400, {"error": f"{type(error).__name__}: {error}"})
+        elif self.path == "/reference/image":
+            source = str(payload.get("image_url", "")).strip()
+            if not source.startswith("data:") and not source.startswith("http"):
+                self._json(400, {"error": "an image is required, as a data "
+                                          "url or an http url"})
+                return
+            if not current.get("openrouter"):
+                self._json(400, {"error": "reading a reference needs an "
+                                          "OpenRouter key"})
+                return
+            try:
+                self._json(200, {"ok": True, **reference.style_from_image(
+                    source, current["openrouter"],
+                    str(payload.get("note", "")))})
+            except Exception as error:
+                self._json(400, {"error": f"{type(error).__name__}: {error}"})
         elif self.path == "/generate/video":
             engine = str(payload.get("engine", "fal"))
             prompt = str(payload.get("prompt", "")).strip()

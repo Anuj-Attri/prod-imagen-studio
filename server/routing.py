@@ -90,6 +90,25 @@ IMAGE_MODELS = [
 ]
 
 
+# Models that can look at a picture and say what is in it. Distinct from
+# the ones that draw: reading and drawing are different jobs and the good
+# models for each are not the same.
+IMAGE_READERS = [
+    "google/gemini-3.1-pro-preview",
+    "openai/gpt-5.2",
+    "anthropic/claude-opus-5",
+]
+
+
+def image_reader(catalogue: dict | None = None) -> str:
+    """The first vision model the provider currently lists."""
+    models = catalogue if catalogue is not None else fetch_catalogue()
+    for identifier in IMAGE_READERS:
+        if identifier in models:
+            return identifier
+    return IMAGE_READERS[0]
+
+
 def image_model(catalogue: dict | None = None) -> str | None:
     """The first image model that the provider currently lists."""
     models = catalogue if catalogue is not None else fetch_catalogue()
