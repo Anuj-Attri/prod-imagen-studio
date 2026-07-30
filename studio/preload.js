@@ -51,4 +51,5 @@ contextBridge.exposeInMainWorld("studio", {
     ipcRenderer.on("update-status", (_e, detail) => handler(detail)),
   downloadUpdate: () => ipcRenderer.invoke("update-download"),
   installUpdate: () => ipcRenderer.invoke("update-install"),
+  openReleases: () => ipcRenderer.invoke("open-releases"),
 });

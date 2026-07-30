@@ -2191,10 +2191,25 @@ check("the update notice appears, and offers to restart once ready", async () =>
     return "a ready update did not offer a restart: " + act.textContent;
   }
 
-  // A failed check must not nag: the application still works.
+  // Two kinds of failure, and they are not the same. Failing after an
+  // update was found means one exists and cannot be fetched, which is worth
+  // saying: hiding it made a release whose feed pointed at a filename that
+  // was never uploaded look exactly like no release at all.
+  window.__updateHandler({ state: "failed", detail: "404" });
+  if (!banner.classList.contains("show")) {
+    return "an update that was found but could not be downloaded said nothing";
+  }
+  if (!/could not be downloaded/i.test(text.textContent)) {
+    return "the notice did not say the download failed: " + text.textContent;
+  }
+
+  // and a check that never found anything must not nag at all
+  window.__updateHandler({ state: "available", version: "" });
+  banner.classList.remove("show");
+  window.__resetUpdateNotice();
   window.__updateHandler({ state: "failed", detail: "no network" });
   return !banner.classList.contains("show") ? true
-    : "a failed update check left a notice on screen";
+    : "a failed check with no update pending still put a notice up";
 });
 
 check("a name that is not in the cast does not silently anchor the art", () => {

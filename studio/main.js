@@ -228,6 +228,13 @@ function buildMenu() {
 ipcMain.handle("open-project", (_e, project) => { createEditor(project); return true; });
 ipcMain.handle("new-project-window", () => { createLauncher(); return true; });
 ipcMain.handle("version", () => app.getVersion());
+// A way out when an update is found and cannot be fetched. Better than a
+// notice with nothing to press on it.
+ipcMain.handle("open-releases", () => {
+  shell.openExternal(
+    "https://github.com/Anuj-Attri/prod-imagen-studio/releases/latest");
+  return true;
+});
 ipcMain.on("unsaved", (event, isDirty) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (win) unsaved.set(win.id, Boolean(isDirty));

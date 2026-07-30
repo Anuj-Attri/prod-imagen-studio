@@ -1,6 +1,6 @@
 {
   "name": "firestarter",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Layered canvas studio for visual stories: manga, anime, posters, diagrams",
   "main": "main.js",
   "author": "Anuj Attri",
@@ -79,6 +79,7 @@
         "owner": "OWNER",
         "repo": "prod-imagen-studio"
       }
-    ]
+    ],
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
   }
 }

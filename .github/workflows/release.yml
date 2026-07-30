@@ -109,6 +109,45 @@ jobs:
       - name: Show what will be attached
         run: ls -lh installers/
 
+      # Every file the update feed names must be a file that exists, under
+      # exactly that name.
+      #
+      # It did not. An artifact name containing spaces is written into
+      # latest.yml with hyphens and uploaded to GitHub with dots, so the
+      # updater asked for Firestarter-Setup-0.6.1.exe while the release held
+      # Firestarter.Setup.0.6.1.exe. The version was found, the download
+      # 404'd, and it looked exactly like there being no update. Two
+      # published releases shipped that way.
+      #
+      # Checked here rather than trusted, because nothing else in the chain
+      # compares the two: the build succeeds, the upload succeeds, the
+      # release looks complete, and only an installed copy ever finds out.
+      - name: The update feed must name files that exist
+        run: |
+          cd installers
+          missing=0
+          for feed in latest*.yml; do
+            [ -f "$feed" ] || continue
+            echo "checking $feed"
+            # every "url:" and "path:" value in the feed
+            named=$(grep -Eo '^\s*(-\s*)?(url|path):\s*\S+' "$feed" \
+                    | sed -E 's/.*:\s*//' | sort -u)
+            for file in $named; do
+              if [ -f "$file" ]; then
+                echo "  ok      $file"
+              else
+                echo "  MISSING $file"
+                missing=$((missing + 1))
+              fi
+            done
+          done
+          if [ "$missing" -gt 0 ]; then
+            echo "::error::$missing file(s) named by an update feed were not built."
+            echo "An artifactName containing spaces causes exactly this."
+            ls -1
+            exit 1
+          fi
+
       # One job, one release. The .yml and .blockmap files are what
       # electron-updater reads to find a new version, so they have to sit
       # on the same release as the installers they describe.

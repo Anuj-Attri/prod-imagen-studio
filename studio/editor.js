@@ -109,6 +109,7 @@ if (!window.studio) {
     // are quiet no-ops rather than absent: the banner asks for them
     // unconditionally and must not throw in a browser or a check.
     onUpdateStatus: () => {}, downloadUpdate: unavailable, installUpdate: unavailable,
+    openReleases: unavailable,
   };
 }
 
@@ -4359,9 +4360,21 @@ document.getElementById("no-engine-dismiss").onclick = () =>
         window.studio.installUpdate();
       });
     } else if (detail.state === "failed") {
-      // Not worth interrupting anybody over: the application works, it
-      // simply could not reach the update server.
-      hide();
+      /* Two different failures, and hiding both was wrong.
+
+         Not reaching the update server at all is nobody's problem: the
+         application works and there may be no network. But failing after an
+         update was found means one exists and cannot be fetched, and that
+         looked exactly like no update existing. It hid a release whose feed
+         pointed at a filename that was never uploaded, so the download
+         404'd every time and said nothing. */
+      if (pending) {
+        show(`Version ${pending} is available but could not be downloaded.`,
+             "Open the releases page",
+             () => window.studio.openReleases());
+      } else {
+        hide();
+      }
     }
   };
 
@@ -4369,6 +4382,8 @@ document.getElementById("no-engine-dismiss").onclick = () =>
   // update exists, so without a way in it was shipping unexercised, and
   // the first draft of it called a function that does not exist.
   window.__updateHandler = onStatus;
+  // so a check can return to the state before an update was ever found
+  window.__resetUpdateNotice = () => { pending = null; hide(); };
   window.studio.onUpdateStatus(onStatus);
 })();
 
