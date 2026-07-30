@@ -45,6 +45,16 @@ let SERVER_TOKEN = localStorage.getItem("studio-token") || "";
 // here once already.
 let WAKING_AFTER_MS = 4000;
 let wakingCalls = 0;
+/* Said once, not before every page.
+
+   The first version showed this whenever a hosted call ran long, which is
+   every call that draws something: generating art takes far longer than
+   waking a server does, so a notice about waking appeared on each page and
+   became furniture. It is only useful when nothing has answered yet, so it
+   is shown at most once per session and only while the server has yet to
+   prove it is awake. Once anything comes back, it never appears again. */
+let serverHasAnswered = false;
+let saidWaking = false;
 
 function showWaking(show) {
   const box = document.getElementById("waking");
@@ -58,21 +68,26 @@ function api(path, options) {
   const remote = !/127\.0\.0\.1|localhost/.test(SERVER);
 
   let timer = null;
-  if (remote) {
+  if (remote && !serverHasAnswered && !saidWaking) {
     wakingCalls += 1;
-    timer = setTimeout(() => showWaking(true), WAKING_AFTER_MS);
+    timer = setTimeout(() => { saidWaking = true; showWaking(true); },
+                       WAKING_AFTER_MS);
+  } else if (remote) {
+    wakingCalls += 1;                     // still counted, never announced
   }
-  const settled = () => {
+  const settled = (answered) => {
     if (!remote) return;
     clearTimeout(timer);
+    // A reply of any kind, even a refusal, proves the server is awake.
+    if (answered) serverHasAnswered = true;
     wakingCalls = Math.max(0, wakingCalls - 1);
     // Only once nothing else is still waiting. A page of panels would
     // otherwise flicker the message on and off as each one lands.
     if (wakingCalls === 0) showWaking(false);
   };
   return fetch(SERVER.replace(/\/+$/, "") + path, { ...settings, headers })
-    .then((response) => { settled(); return response; },
-          (error) => { settled(); throw error; });
+    .then((response) => { settled(true); return response; },
+          (error) => { settled(false); throw error; });
 }
 
 // Outside Electron (a browser, a test harness) the preload bridge does

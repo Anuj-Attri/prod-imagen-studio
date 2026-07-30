@@ -1816,6 +1816,8 @@ check("a slow hosted server says it is waking, and stops when it answers", async
   const realServer = SERVER;
   const realDelay = WAKING_AFTER_MS;
   WAKING_AFTER_MS = 20;
+  serverHasAnswered = false;
+  saidWaking = false;
   SERVER = "https://example.invalid";
   let release = null;
   window.fetch = () => new Promise((resolve) => { release = resolve; });
@@ -1966,6 +1968,50 @@ check("an empty server field means the address this build ships with", async () 
     SERVER = realServer;
     DEPLOYMENT.server = shipped;
     localStorage.removeItem("studio-server");
+  }
+  return true;
+});
+
+check("the waking notice is said once, not before every page", async () => {
+  // It used to appear whenever a hosted call ran long, which is every call
+  // that draws something: generating art takes far longer than waking a
+  // server, so a notice about waking showed up on each page and became
+  // furniture.
+  resetForCheck("manga");
+  const notice = document.getElementById("waking");
+  const realFetch = window.fetch;
+  const realServer = SERVER;
+  const realDelay = WAKING_AFTER_MS;
+  WAKING_AFTER_MS = 20;
+  SERVER = "https://example.invalid";
+  serverHasAnswered = false;
+  saidWaking = false;
+
+  let release = null;
+  window.fetch = () => new Promise((resolve) => { release = resolve; });
+  try {
+    // first call: slow, and the server has never answered, so it speaks
+    let flight = api("/health");
+    await new Promise((r) => setTimeout(r, 80));
+    const spokeFirst = notice.classList.contains("show");
+    release({ ok: true, json: async () => ({}) });
+    await flight;
+    if (!spokeFirst) return "it said nothing on the very first slow call";
+
+    // second call, equally slow, but the server has now proven it is awake
+    flight = api("/generate");
+    await new Promise((r) => setTimeout(r, 80));
+    const spokeAgain = notice.classList.contains("show");
+    release({ ok: true, json: async () => ({}) });
+    await flight;
+    if (spokeAgain) return "it announced waking again after the server had replied";
+  } finally {
+    window.fetch = realFetch;
+    SERVER = realServer;
+    WAKING_AFTER_MS = realDelay;
+    serverHasAnswered = false;
+    saidWaking = false;
+    notice.classList.remove("show");
   }
   return true;
 });
