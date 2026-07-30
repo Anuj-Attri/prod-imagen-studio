@@ -7,7 +7,29 @@
 
 // Where the generation server lives. Local by default; a deployed one
 // can be named in Settings, with a bearer token when it is protected.
-let SERVER = localStorage.getItem("studio-server") || "http://127.0.0.1:8787";
+/* Where the backend is.
+
+   Three places, most specific first: what this person set in Settings,
+   what the build was shipped pointing at, then a server on this machine.
+   A shipped copy therefore works without being configured, while a
+   developer's copy still prefers the one they are running locally.
+
+   The url is baked in because it is public. The token is not: it is
+   asked for on first run, so each person has their own and one leaking
+   is something to revoke rather than a reason to rebuild. */
+let DEPLOYMENT = { server: "", signup: "" };
+try {
+  // eslint-disable-next-line
+  DEPLOYMENT = { ...DEPLOYMENT, ...require("./deployment.json") };
+} catch (_) {
+  try {
+    const el = document.getElementById("deployment");
+    if (el) DEPLOYMENT = { ...DEPLOYMENT, ...JSON.parse(el.textContent || "{}") };
+  } catch (__) { /* shipped without one; local it is */ }
+}
+let SERVER = localStorage.getItem("studio-server")
+  || DEPLOYMENT.server
+  || "http://127.0.0.1:8787";
 let SERVER_TOKEN = localStorage.getItem("studio-token") || "";
 
 function api(path, options) {
@@ -32,6 +54,10 @@ if (!window.studio) {
     setUnsaved: () => {}, closeNow: () => {},
     newProjectWindow: unavailable, openProjectFile: unavailable,
     saveKeys: unavailable, loadKeys: async () => ({}), win: () => {}, onMenu: null,
+    // Outside a packaged application there is nothing to update, so these
+    // are quiet no-ops rather than absent: the banner asks for them
+    // unconditionally and must not throw in a browser or a check.
+    onUpdateStatus: () => {}, downloadUpdate: unavailable, installUpdate: unavailable,
   };
 }
 
@@ -4102,6 +4128,72 @@ document.getElementById("no-engine-settings").onclick = () => {
 };
 document.getElementById("no-engine-dismiss").onclick = () =>
   document.getElementById("no-engine").classList.remove("show");
+
+/* An update, said in the window instead of by the operating system.
+
+   A desktop notification arrives while somebody is drawing and is gone
+   before they look up. This waits in the corner until it is dealt with,
+   and never installs anything unasked: the download is a choice, and
+   restarting is a second choice made after the work is saved. */
+(function watchForUpdates() {
+  const banner = document.getElementById("update-banner");
+  const text = document.getElementById("update-text");
+  const act = document.getElementById("update-act");
+  const later = document.getElementById("update-later");
+  if (!banner || !window.studio.onUpdateStatus) return;
+
+  let pending = null;
+  const hide = () => banner.classList.remove("show");
+  later.onclick = hide;
+
+  const show = (message, button, onClick) => {
+    text.textContent = message;
+    act.textContent = button || "";
+    act.style.display = button ? "" : "none";
+    act.onclick = onClick || null;
+    banner.classList.add("show");
+  };
+
+  const onStatus = (detail) => {
+    if (!detail) return;
+    if (detail.state === "available") {
+      pending = detail.version;
+      show(`Version ${detail.version} is available.`, "Download",
+        async () => {
+          show(`Downloading ${pending}...`, null, null);
+          const result = await window.studio.downloadUpdate();
+          if (result && result.ok === false) {
+            show("The download did not finish.", "Try again",
+              () => window.studio.downloadUpdate());
+          }
+        });
+    } else if (detail.state === "downloading") {
+      show(`Downloading update: ${detail.percent}%`, null, null);
+    } else if (detail.state === "ready") {
+      show(`Version ${detail.version} is ready.`, "Restart now", async () => {
+        // The work is saved before the application is replaced. Losing a
+        // page to an update would be an unusually poor trade. Saving goes
+        // through the button, which is the only thing that knows whether
+        // this document has a path yet or needs to ask for one.
+        if (savedSnapshot !== snapshotDoc()) {
+          const saved = await document.getElementById("save").onclick();
+          if (!saved) return;              // they cancelled; keep the banner
+        }
+        window.studio.installUpdate();
+      });
+    } else if (detail.state === "failed") {
+      // Not worth interrupting anybody over: the application works, it
+      // simply could not reach the update server.
+      hide();
+    }
+  };
+
+  // Exposed so a check can drive it. This path only runs when a real
+  // update exists, so without a way in it was shipping unexercised, and
+  // the first draft of it called a function that does not exist.
+  window.__updateHandler = onStatus;
+  window.studio.onUpdateStatus(onStatus);
+})();
 
 setupRulerDragging();
 drawGuides();

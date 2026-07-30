@@ -1802,6 +1802,37 @@ check("asking for another take still gives a different one", () => {
     : "another take reproduced the same art";
 });
 
+check("the update notice appears, and offers to restart once ready", async () => {
+  // This path only runs when a real update arrives, so nothing exercised
+  // it: the first draft called a save function that does not exist and
+  // would have thrown the moment an update was found.
+  resetForCheck("manga");
+  const banner = document.getElementById("update-banner");
+  const text = document.getElementById("update-text");
+  const act = document.getElementById("update-act");
+  if (!banner) return "there is no update banner in the page";
+  if (!window.__updateHandler) return "nothing is listening for update news";
+
+  window.__updateHandler({ state: "available", version: "9.9.9" });
+  if (!banner.classList.contains("show")) return "an available update said nothing";
+  if (!text.textContent.includes("9.9.9")) {
+    return "the notice did not name the version: " + text.textContent;
+  }
+
+  window.__updateHandler({ state: "downloading", percent: 42 });
+  if (!text.textContent.includes("42")) return "progress was not shown";
+
+  window.__updateHandler({ state: "ready", version: "9.9.9" });
+  if (!/restart/i.test(act.textContent)) {
+    return "a ready update did not offer a restart: " + act.textContent;
+  }
+
+  // A failed check must not nag: the application still works.
+  window.__updateHandler({ state: "failed", detail: "no network" });
+  return !banner.classList.contains("show") ? true
+    : "a failed update check left a notice on screen";
+});
+
 check("a name that is not in the cast does not silently anchor the art", () => {
   // Raised by the automated review: nothing covered a panel naming
   // somebody who has been renamed or deleted. It falls back to the

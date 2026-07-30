@@ -342,13 +342,68 @@ ipcMain.handle("load-keys", async () => {
   try { return JSON.parse(fs.readFileSync(keysPath, "utf-8")); } catch { return {}; }
 });
 
-app.whenReady().then(() => {
-  if (app.isPackaged) {
-    try {
-      const { autoUpdater } = require("electron-updater");
-      autoUpdater.checkForUpdatesAndNotify();
-    } catch (_) { /* updater unavailable in dev */ }
+/* Tell the windows about an update, rather than the operating system.
+
+   checkForUpdatesAndNotify raises a notification outside the application,
+   which on a busy desktop is a thing that flashes past while somebody is
+   drawing. Saying it inside the window means it is still there when they
+   look up, and it can say what the update is rather than only that one
+   exists. Nothing is installed without being asked. */
+function watchForUpdates() {
+  if (!app.isPackaged) return;            // no published build to compare to
+  let updater = null;
+  try {
+    updater = require("electron-updater").autoUpdater;
+  } catch (_) {
+    return;                               // updater unavailable
   }
+  if (!updater) return;
+  updater.autoDownload = false;           // ask first
+
+  const tellWindows = (channel, detail) => {
+    for (const window_ of BrowserWindow.getAllWindows()) {
+      if (!window_.isDestroyed()) window_.webContents.send(channel, detail);
+    }
+  };
+
+  updater.on("update-available", (info) => {
+    tellWindows("update-status", { state: "available", version: info.version });
+  });
+  updater.on("download-progress", (progress) => {
+    tellWindows("update-status",
+      { state: "downloading", percent: Math.round(progress.percent) });
+  });
+  updater.on("update-downloaded", (info) => {
+    tellWindows("update-status", { state: "ready", version: info.version });
+  });
+  updater.on("error", (error) => {
+    // A failed check is not the user's problem and must not interrupt
+    // them; it is reported quietly and only if a window asks.
+    tellWindows("update-status", { state: "failed", detail: String(error) });
+  });
+
+  ipcMain.handle("update-download", async () => {
+    try {
+      await updater.downloadUpdate();
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: String(error) };
+    }
+  });
+  // Restarting discards nothing: the renderer is asked to save first and
+  // only calls this once it has.
+  ipcMain.handle("update-install", () => {
+    updater.quitAndInstall(false, true);
+    return { ok: true };
+  });
+
+  updater.checkForUpdates().catch(() => {});
+  // and again every four hours, for an application left open for days
+  setInterval(() => updater.checkForUpdates().catch(() => {}), 4 * 3600 * 1000);
+}
+
+app.whenReady().then(() => {
+  watchForUpdates();
   buildMenu();
   offerRecovery();
   createLauncher();

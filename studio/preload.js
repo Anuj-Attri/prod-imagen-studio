@@ -19,4 +19,8 @@ contextBridge.exposeInMainWorld("studio", {
   writePng: (filePath, dataUrl) => ipcRenderer.invoke("write-png", filePath, dataUrl),
   newProjectWindow: () => ipcRenderer.invoke("new-project-window"),
   openProjectFile: () => ipcRenderer.invoke("open-project-file"),
+  onUpdateStatus: (handler) =>
+    ipcRenderer.on("update-status", (_e, detail) => handler(detail)),
+  downloadUpdate: () => ipcRenderer.invoke("update-download"),
+  installUpdate: () => ipcRenderer.invoke("update-install"),
 });

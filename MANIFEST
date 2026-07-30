@@ -15,11 +15,14 @@ server/Dockerfile
 server/bench.py
 server/gen_server.py
 server/keys.example.json
+server/limits.py
 server/probe.py
 server/review.py
 server/routing.py
+server/video.py
 start-studio.cmd
 start-studio.sh
+studio/deployment.json
 studio/e2e.js
 studio/editor.html
 studio/editor.js

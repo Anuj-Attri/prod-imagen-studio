@@ -311,6 +311,18 @@
       animation: spin 700ms linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+    /* Sits with the engine notice rather than over the drawing: an
+       update is worth mentioning and never worth interrupting. */
+    #update-banner {
+      position: absolute; right: 16px; bottom: 16px;
+      display: none; align-items: center; gap: 10px; pointer-events: auto;
+      background: var(--surface); border: 1px solid var(--hairline-strong);
+      border-left: 3px solid #4f9d69; border-radius: 9px; padding: 9px 12px;
+      z-index: 23; box-shadow: var(--page-bloom); font-size: 12.5px;
+    }
+    #update-banner.show { display: flex; }
+    #update-banner button { font-size: 12px; padding: 4px 10px; }
+
     #no-engine {
       position: absolute; left: 50%; top: 16px; transform: translateX(-50%);
       display: none; pointer-events: auto; max-width: 430px;
@@ -442,6 +454,11 @@
     <canvas id="ruler-left"></canvas>
     <div id="ruler-corner"></div>
     <div id="tool-options"></div>
+    <div id="update-banner">
+      <span id="update-text"></span>
+      <button id="update-act" class="primary"></button>
+      <button id="update-later" class="quiet">Later</button>
+    </div>
     <div id="no-engine">
       <b>No image engine configured</b>
       <p>Panels are laid out and prompts are written, but nothing can render

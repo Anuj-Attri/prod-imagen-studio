@@ -24,6 +24,8 @@ import threading
 import time
 import urllib.error
 import urllib.request
+
+from . import limits, routing, video
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -54,6 +56,9 @@ def keys() -> dict:
         "openai": data.get("openai") or os.environ.get("OPENAI_API_KEY"),
         "bfl": data.get("bfl") or os.environ.get("BFL_API_KEY"),
         "anthropic": data.get("anthropic") or os.environ.get("ANTHROPIC_API_KEY"),
+        "openrouter": data.get("openrouter") or os.environ.get("OPENROUTER_API_KEY"),
+        "fal": data.get("fal") or os.environ.get("FAL_KEY"),
+        "replicate": data.get("replicate") or os.environ.get("REPLICATE_API_TOKEN"),
         "llm_url": data.get("llm_url"),
         "llm_model": data.get("llm_model"),
     }
@@ -425,6 +430,43 @@ def llm_chat(current: dict, system: str, messages: list, max_tokens: int = 900,
                     "Run: ollama pull qwen3:8b (or set your model in Settings)."
                 )
             raise RuntimeError(f"Local model call failed ({error.code}): {detail}")
+    if current.get("openrouter"):
+        # The routing layer decides which model does which job, so a
+        # deployment gets a cheap one for structure and a better one for
+        # anything a person reads. Adding the key to the table without
+        # this taught the server it had a backend it could not actually
+        # use: every request failed saying there was no language backend
+        # while a working key sat in the file.
+        step = "story" if max_tokens > 1200 else "beats"
+        choice = routing.model_for(step)
+        model = choice["model"] or "openai/gpt-5-mini"
+        request = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "system", "content": system}] + messages,
+        }
+        if json_mode:
+            request["response_format"] = {"type": "json_object"}
+        result = http_json(
+            "https://openrouter.ai/api/v1/chat/completions",
+            request,
+            {"Authorization": f"Bearer {current['openrouter']}",
+             "X-Title": "prod-imagen studio"},
+            timeout=180,
+        )
+        message = (result.get("choices") or [{}])[0].get("message") or {}
+        # Strip before choosing. A content field holding only whitespace
+        # is truthy, so picking it discards an answer sitting in the
+        # reasoning field; that mistake threw away a working review once
+        # already.
+        for field in ("content", "reasoning"):
+            candidate = strip_reasoning(str(message.get(field) or "")).strip()
+            if candidate:
+                return candidate
+        raise RuntimeError(
+            f"{model} replied without an answer. Send it again, or name a "
+            f"different model for this step in server/routing.py."
+        )
     if current.get("anthropic"):
         result = http_json(
             "https://api.anthropic.com/v1/messages",
@@ -776,11 +818,42 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _authorized(self) -> bool:
-        if not AUTH_TOKEN:
-            return True
+    def _bearer(self) -> str:
         header = self.headers.get("Authorization", "")
-        return header == f"Bearer {AUTH_TOKEN}"
+        return header[7:].strip() if header.startswith("Bearer ") else ""
+
+    def _authorized(self) -> bool:
+        """Who is calling, and may they call again yet.
+
+        A deployment pays for every request it serves, so an unknown
+        caller and an unbounded one are the same problem. Answers the
+        response itself, because the two refusals differ: one is
+        permanent and one asks the caller to wait.
+        """
+        tokens = limits.load_tokens()
+        if not tokens:
+            return True                      # unprotected, as on a laptop
+        token = self._bearer()
+        who = limits.label_for(token, tokens)
+        if not who:
+            self._json(401, {"error": "missing or invalid bearer token"})
+            return False
+        verdict = limits.check(token)
+        if not verdict["ok"]:
+            self.send_response(429)
+            self.send_header("Retry-After", str(verdict["retry_after"]))
+            self.send_header("Content-Type", "application/json")
+            body = json.dumps({
+                "error": f"too many requests ({verdict['reason']} limit)",
+                "retry_after": verdict["retry_after"],
+                "used_today": verdict["day"],
+                "allowed_per_day": limits.PER_DAY,
+            }).encode()
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return False
+        return True
 
     def do_OPTIONS(self):  # noqa: N802
         self._json(200, {"ok": True})
@@ -791,24 +864,29 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {
                 "ok": True,
                 "build": BUILD,
-                "auth": bool(AUTH_TOKEN),
+                "auth": bool(limits.load_tokens()),
                 "local": gpu_available(),
                 "apis": any([current["ideogram"], current["openai"], current["bfl"]]),
-                "story": bool(current["anthropic"]) or local_llm_reachable(current),
+                "story": bool(current["anthropic"]) or local_llm_reachable(current)
+                         or bool(current.get("openrouter")),
+                "video": video.available(current),
             })
             return
         if not self._authorized():
-            self._json(401, {"error": "missing or invalid bearer token"})
+            return                       # already answered, with a reason
+        if self.path == "/usage":
+            self._json(200, limits.usage(self._bearer()))
             return
         if self.path == "/engines":
-            self._json(200, {"engines": engine_table(current)})
+            self._json(200, {"engines": engine_table(current),
+                             "video": video.describe(current)})
         else:
             self._json(404, {"error": "unknown endpoint"})
 
     def do_POST(self):  # noqa: N802
         if not self._authorized():
-            self._json(401, {"error": "missing or invalid bearer token"})
-            return
+            return                       # already answered, with a reason
+        current = keys()                 # the video branch needs these
         length = int(self.headers.get("Content-Length", "0"))
         try:
             payload = json.loads(self.rfile.read(length) or b"{}")
@@ -817,6 +895,21 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/generate":
             self._generate(payload)
+        elif self.path == "/generate/video":
+            engine = str(payload.get("engine", "fal"))
+            prompt = str(payload.get("prompt", "")).strip()
+            if not prompt:
+                self._json(400, {"error": "a prompt is required"})
+                return
+            if len(prompt) > MAX_PROMPT:
+                self._json(400, {"error": f"prompt longer than {MAX_PROMPT}"})
+                return
+            result = video.generate(
+                engine, prompt, current.get(engine) or "",
+                image_url=payload.get("image_url"),
+                seconds=payload.get("seconds"),
+            )
+            self._json(200 if result["ok"] else 400, result)
         elif self.path == "/story/analyze":
             self._story(payload)
         elif self.path == "/agent/chat":
