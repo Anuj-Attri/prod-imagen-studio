@@ -43,8 +43,19 @@ function deploymentArgument() {
   }
 }
 
+/* A frameless window, differently on each platform.
+
+   Windows and Linux get no frame and the application draws its own
+   controls. A Mac keeps its traffic lights, inset, because hiding them
+   leaves a window that cannot be closed the way every other Mac window
+   closes, and puts our own controls on the wrong side of the title bar.
+   The renderer hides its own buttons when it sees a Mac. */
+const onMac = process.platform === "darwin";
+
 const frameless = {
-  frame: false,
+  ...(onMac
+    ? { titleBarStyle: "hiddenInset", trafficLightPosition: { x: 14, y: 14 } }
+    : { frame: false }),
   backgroundColor: "#0b0a0e",
   webPreferences: {
     preload: path.join(__dirname, "preload.js"),

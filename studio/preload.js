@@ -26,6 +26,9 @@ function deployment() {
 
 contextBridge.exposeInMainWorld("studio", {
   deployment: deployment(),
+  // The renderer has to lay itself out differently on a Mac, and cannot
+  // ask the operating system directly. process.platform reaches a sandbox.
+  platform: process.platform,
   openProject: (project) => ipcRenderer.invoke("open-project", project),
   saveProjectDialog: (name) => ipcRenderer.invoke("save-project-dialog", name),
   writeFile: (filePath, contents) => ipcRenderer.invoke("write-file", filePath, contents),

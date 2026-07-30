@@ -48,6 +48,9 @@
       --page-bloom: 0 0 46px rgba(255,150,70,0.13), 0 10px 40px rgba(0,0,0,0.62);
       --grain-opacity: 0.06;
     }
+    /* The traffic lights sit at the left of the title bar on a Mac, so
+       the bar's own contents start further in to avoid them. */
+    :root.on-mac #topbar { padding-left: 78px; }
     * { box-sizing: border-box; margin: 0; user-select: none; }
     ::-webkit-scrollbar { width: 8px; height: 8px; }
     ::-webkit-scrollbar-track { background: transparent; }

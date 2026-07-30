@@ -2016,6 +2016,53 @@ check("the waking notice is said once, not before every page", async () => {
   return true;
 });
 
+check("shortcuts answer to Cmd as well as Ctrl", () => {
+  // A Mac has no Ctrl modifier in practice: Cmd arrives as metaKey. Every
+  // test written only for ctrlKey simply never fires there, so the shortcut
+  // reads as broken rather than unbound. Checked by dispatching both.
+  resetForCheck("manga");
+  // The handler ignores shortcuts while somebody is typing, which is
+  // correct and which an earlier check can leave in place. Focus is
+  // returned to the body first so this measures the shortcut, not the
+  // focus left over from something else.
+  if (document.activeElement && document.activeElement.blur) {
+    document.activeElement.blur();
+  }
+  addLayer("rect", { x: 20, y: 20, w: 80, h: 80 });
+  commit();
+  const before = currentPage().layers.length;
+  addLayer("rect", { x: 60, y: 60, w: 80, h: 80 });
+  commit();
+
+  // Ctrl+Z, the Windows and Linux form
+  document.dispatchEvent(new KeyboardEvent("keydown",
+    { key: "z", ctrlKey: true, bubbles: true }));
+  const afterCtrl = currentPage().layers.length;
+
+  // and Cmd+Z, which is the same intention on a Mac
+  addLayer("rect", { x: 40, y: 40, w: 80, h: 80 });
+  commit();
+  const staged = currentPage().layers.length;
+  document.dispatchEvent(new KeyboardEvent("keydown",
+    { key: "z", metaKey: true, bubbles: true }));
+  const afterMeta = currentPage().layers.length;
+
+  if (afterCtrl > before) {
+    return "Ctrl+Z did not undo: " + before + " became " + afterCtrl;
+  }
+  return afterMeta < staged ? true
+    : "Cmd+Z did nothing, so every shortcut is dead on a Mac";
+});
+
+check("the window controls are hidden where the system draws its own", () => {
+  // A Mac keeps its traffic lights, so ours would be a second set on the
+  // wrong side of the bar.
+  const group = document.getElementById("winctl");
+  if (!group) return "there is no window control group to hide";
+  const bar = document.getElementById("topbar");
+  return bar ? true : "the bar the mac rule indents does not exist";
+});
+
 check("right clicking the canvas actually opens the menu", () => {
   // The existing check called the menu's actions directly, so it proved
   // the actions work and never proved the menu opens. Reported broken

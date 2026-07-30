@@ -862,7 +862,10 @@ document.getElementById("zoom-in").onclick = () => setZoom(zoom * 1.2);
 document.getElementById("zoom-out").onclick = () => setZoom(zoom / 1.2);
 document.getElementById("zoom-fit").onclick = fitPage;
 wrap.addEventListener("wheel", (event) => {
-  if (event.ctrlKey) {
+  // Cmd on a Mac, Ctrl elsewhere. Testing only for Ctrl meant pinch and
+  // Cmd-scroll zoom did nothing at all on a Mac, while the page scrolled
+  // instead, which reads as the zoom being broken rather than unbound.
+  if (event.ctrlKey || event.metaKey) {
     event.preventDefault();
     const pointer = stage.getPointerPosition() || { x: stage.width() / 2, y: stage.height() / 2 };
     setZoom(zoom * (event.deltaY < 0 ? 1.1 : 1 / 1.1), pointer);
@@ -1748,7 +1751,7 @@ function renderLayerList() {
     row.addEventListener("click", (event) => {
       if (event.target.classList.contains("vis")) { layer.visible = !layer.visible; renderCanvas(); commit(); return; }
       if (event.target.classList.contains("lock")) { layer.locked = !layer.locked; renderCanvas(); commit(); return; }
-      select(layer.id, { toggle: event.shiftKey || event.ctrlKey });
+      select(layer.id, { toggle: event.shiftKey || event.ctrlKey || event.metaKey });
     });
     row.querySelector(".name").addEventListener("dblclick", (event) => {
       event.stopPropagation();
@@ -3917,6 +3920,15 @@ function setEngineDot(id, ok) {
 
 
 // ------------------------------------------------- window / theme / chat --
+/* A Mac draws its own window controls, so ours would be a second set on
+   the wrong side. Hidden there rather than removed, because the same page
+   runs on three platforms and two of them need them. */
+if (window.studio.platform === "darwin") {
+  const group = document.getElementById("winctl");
+  if (group) group.style.display = "none";
+  document.documentElement.classList.add("on-mac");
+}
+
 document.getElementById("win-min").onclick = () => window.studio.win("min");
 document.getElementById("win-max").onclick = () => window.studio.win("max");
 document.getElementById("win-close").onclick = () => window.studio.win("close");
