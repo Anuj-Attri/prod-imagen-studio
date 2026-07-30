@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http://127.0.0.1:8787 http://localhost:8787 https:; object-src 'none'; base-uri 'none'" />
-  <title>prod-imagen studio</title>
+  <title>Firestarter</title>
   <style>
     :root {
       /* Obsidian + Void Violet (dark is default) */
@@ -29,6 +29,24 @@
       --accent-soft: rgba(61,47,122,0.10);
       --page-bloom: 0 1px 2px rgba(20,18,24,0.08), 0 14px 44px rgba(20,18,24,0.12);
       --grain-opacity: 0.03;
+    }
+    /* Fire. The dark layout with the cool cast taken out: the greys carry
+       a little red so they sit under an ember accent instead of fighting
+       it, and the page glows warm rather than white.
+
+       The page itself stays true white in every theme. A warm cast on the
+       artwork would be a lie about what gets exported, and someone would
+       colour against it and wonder why the print looked wrong. */
+    :root[data-theme="fire"] {
+      --bg: #0d0705; --surface: #17100c; --surface-2: #1e1510; --surface-3: #281b14;
+      --hairline: rgba(255,206,168,0.10); --hairline-strong: rgba(255,206,168,0.20);
+      --edge: rgba(255,196,150,0.26); --edge-w: 1px;
+      --ink: #f4e9e2; --ink-2: rgba(244,233,226,0.64); --ink-3: rgba(244,233,226,0.44);
+      --accent-deep: #7d2a12; --accent: #d9541f; --accent-glow: #ff8a2e;
+      --accent-soft: rgba(217,84,31,0.20);
+      --good: #6a9e52; --bad: #d64a3a;
+      --page-bloom: 0 0 46px rgba(255,150,70,0.13), 0 10px 40px rgba(0,0,0,0.62);
+      --grain-opacity: 0.06;
     }
     * { box-sizing: border-box; margin: 0; user-select: none; }
     ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -311,6 +329,36 @@
       animation: spin 700ms linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+    /* Sits with the engine notice rather than over the drawing: an
+       update is worth mentioning and never worth interrupting. */
+    /* A sleeping free-tier backend answers in about a minute. Saying so
+       is the difference between waiting and thinking it is broken. */
+    #waking {
+      position: absolute; left: 50%; top: 16px; transform: translateX(-50%);
+      display: none; align-items: center; gap: 10px; pointer-events: auto;
+      background: var(--surface); border: 1px solid var(--hairline-strong);
+      border-left: 3px solid #c9a227; border-radius: 9px; padding: 10px 14px;
+      z-index: 24; box-shadow: var(--page-bloom); font-size: 12.5px;
+      max-width: 380px; color: var(--ink-2);
+    }
+    #waking.show { display: flex; }
+    #waking .spin {
+      width: 12px; height: 12px; flex: none; border-radius: 50%;
+      border: 2px solid var(--hairline-strong); border-top-color: #c9a227;
+      animation: waking-spin .8s linear infinite;
+    }
+    @keyframes waking-spin { to { transform: rotate(360deg); } }
+
+    #update-banner {
+      position: absolute; right: 16px; bottom: 16px;
+      display: none; align-items: center; gap: 10px; pointer-events: auto;
+      background: var(--surface); border: 1px solid var(--hairline-strong);
+      border-left: 3px solid #4f9d69; border-radius: 9px; padding: 9px 12px;
+      z-index: 23; box-shadow: var(--page-bloom); font-size: 12.5px;
+    }
+    #update-banner.show { display: flex; }
+    #update-banner button { font-size: 12px; padding: 4px 10px; }
+
     #no-engine {
       position: absolute; left: 50%; top: 16px; transform: translateX(-50%);
       display: none; pointer-events: auto; max-width: 430px;
@@ -442,6 +490,16 @@
     <canvas id="ruler-left"></canvas>
     <div id="ruler-corner"></div>
     <div id="tool-options"></div>
+    <div id="waking">
+      <span class="spin"></span>
+      <span>Waking the server. On the free plan this takes up to a minute
+        the first time, then stays quick.</span>
+    </div>
+    <div id="update-banner">
+      <span id="update-text"></span>
+      <button id="update-act" class="primary"></button>
+      <button id="update-later" class="quiet">Later</button>
+    </div>
     <div id="no-engine">
       <b>No image engine configured</b>
       <p>Panels are laid out and prompts are written, but nothing can render

@@ -77,7 +77,7 @@ def ask(model: str, system: str, user: str, key: str, timeout: int = 120) -> dic
     request = urllib.request.Request(OPENROUTER_CHAT, data=body, headers={
         "Authorization": "Bearer " + key,
         "Content-Type": "application/json",
-        "X-Title": "prod-imagen studio bench",
+        "X-Title": "Firestarter bench",
     })
     started = time.perf_counter()
     with urllib.request.urlopen(request, timeout=timeout) as response:

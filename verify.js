@@ -92,7 +92,7 @@ function waitForServer(port, timeoutMs) {
 }
 
 (async () => {
-  console.log("prod-imagen studio: verifying\n");
+  console.log("Firestarter: verifying\n");
 
   step("sources parse", () => node([
     "--check", path.join("studio", "main.js"),
@@ -127,7 +127,8 @@ function waitForServer(port, timeoutMs) {
   // reviewer were added later and were going unchecked, so a syntax
   // error in any of them would have reached a build machine untouched.
   step("server compiles", () => python(["-m", "py_compile",
-    ...["gen_server.py", "probe.py", "routing.py", "bench.py", "review.py"]
+    ...["gen_server.py", "probe.py", "routing.py", "bench.py", "review.py",
+        "limits.py", "video.py"]
       .map((file) => path.join("server", file))]));
 
   step("renderer self-test", () => node([path.join("studio", "selftest.js")]));

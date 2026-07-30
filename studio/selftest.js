@@ -1802,6 +1802,248 @@ check("asking for another take still gives a different one", () => {
     : "another take reproduced the same art";
 });
 
+check("a slow hosted server says it is waking, and stops when it answers", async () => {
+  // Free hosting sleeps and takes most of a minute to wake. Unsaid, the
+  // first action of a session reads as a broken application rather than a
+  // waiting one. The delay is shortened here rather than waited out: the
+  // page gets a few seconds of virtual time in total.
+  resetForCheck("manga");
+  const notice = document.getElementById("waking");
+  if (!notice) return "there is no waking notice in the page";
+  notice.classList.remove("show");
+
+  const realFetch = window.fetch;
+  const realServer = SERVER;
+  const realDelay = WAKING_AFTER_MS;
+  WAKING_AFTER_MS = 20;
+  SERVER = "https://example.invalid";
+  let release = null;
+  window.fetch = () => new Promise((resolve) => { release = resolve; });
+  try {
+    const inFlight = api("/health");
+    await new Promise((r) => setTimeout(r, 80));
+    if (!notice.classList.contains("show")) {
+      return "a call slower than the delay said nothing";
+    }
+    release({ ok: true, json: async () => ({}) });
+    await inFlight;
+    if (notice.classList.contains("show")) {
+      return "the notice stayed up after the server answered";
+    }
+  } finally {
+    window.fetch = realFetch;
+    SERVER = realServer;
+    WAKING_AFTER_MS = realDelay;
+  }
+  return true;
+});
+
+check("a server on this machine is never described as waking", async () => {
+  resetForCheck("manga");
+  const notice = document.getElementById("waking");
+  notice.classList.remove("show");
+  const realFetch = window.fetch;
+  const realServer = SERVER;
+  const realDelay = WAKING_AFTER_MS;
+  WAKING_AFTER_MS = 20;
+  SERVER = "http://127.0.0.1:8787";
+  let release = null;
+  window.fetch = () => new Promise((resolve) => { release = resolve; });
+  try {
+    const inFlight = api("/health");
+    await new Promise((r) => setTimeout(r, 80));
+    const said = notice.classList.contains("show");
+    release({ ok: true, json: async () => ({}) });
+    await inFlight;
+    if (said) return "a local server was described as waking up";
+  } finally {
+    window.fetch = realFetch;
+    SERVER = realServer;
+    WAKING_AFTER_MS = realDelay;
+  }
+  return true;
+});
+
+check("the theme button cycles all three looks and remembers the choice", () => {
+  // Dark carries no value, which is what a two-state toggle compared
+  // against. A third look means the order has to be written down, or an
+  // unanticipated value leaves the button doing nothing.
+  const button = document.getElementById("theme-toggle");
+  if (!button) return "there is no theme button";
+  const started = document.documentElement.dataset.theme || "";
+
+  applyTheme("");
+  const seen = [];
+  for (let i = 0; i < 4; i += 1) {
+    button.onclick();
+    seen.push(document.documentElement.dataset.theme || "dark");
+  }
+  applyTheme(started);
+
+  const expected = ["light", "fire", "dark", "light"];
+  if (JSON.stringify(seen) !== JSON.stringify(expected)) {
+    return "cycled through " + seen.join(", ") + " instead of " + expected.join(", ");
+  }
+  return localStorage.getItem("studio-theme") === "light" ? true
+    : "the choice was not remembered";
+});
+
+check("a theme nobody has styles for falls back rather than breaking", () => {
+  const started = document.documentElement.dataset.theme || "";
+  const settled = applyTheme("chartreuse-mode");
+  applyTheme(started);
+  return settled === "" ? true
+    : "an unknown theme was applied as " + JSON.stringify(settled);
+});
+
+check("the fire theme actually restyles the window", () => {
+  const started = document.documentElement.dataset.theme || "";
+  applyTheme("");
+  const dark = getComputedStyle(document.documentElement)
+    .getPropertyValue("--accent").trim();
+  applyTheme("fire");
+  const fire = getComputedStyle(document.documentElement)
+    .getPropertyValue("--accent").trim();
+  applyTheme(started);
+  if (!fire) return "the fire theme defines no accent colour";
+  return fire !== dark ? true
+    : "fire and dark share the same accent, so nothing would look different";
+});
+
+check("right clicking the canvas actually opens the menu", () => {
+  // The existing check called the menu's actions directly, so it proved
+  // the actions work and never proved the menu opens. Reported broken
+  // twice while that check stayed green, which is the signature of
+  // testing the payload instead of the trigger.
+  resetForCheck("manga");
+  const menu = document.querySelector(".menu-drop");
+  if (!menu) return "no menu element was ever created";
+  menu.classList.remove("show");
+
+  // Dispatched on the canvas a person actually clicks, not on the
+  // container the listener happens to be attached to. Aiming at the
+  // container proves the listener fires and proves nothing about whether
+  // a real click ever reaches it.
+  const container = stage.container();
+  if (!container) return "the stage has no container to right click on";
+  const target = container.querySelector("canvas") || container;
+  if (target === container) return "the stage drew no canvas to click on";
+  target.dispatchEvent(new MouseEvent("contextmenu",
+    { bubbles: true, cancelable: true, clientX: 200, clientY: 200 }));
+
+  if (!menu.classList.contains("show")) {
+    return "right clicking the canvas itself opened nothing";
+  }
+  return menu.querySelectorAll(".menu-item").length > 0 ? true
+    : "the menu opened with nothing in it";
+});
+
+check("right clicking a text field offers cut, copy and paste", () => {
+  // The reported fault. The canvas had a menu, so shapes could be cut and
+  // copied; everywhere else in the window a right click produced nothing,
+  // because Electron ships no menu of its own and the checks only ever
+  // exercised the canvas.
+  resetForCheck("manga");
+  const menu = document.querySelector(".menu-drop");
+  menu.classList.remove("show");
+
+  const field = document.createElement("textarea");
+  field.value = "some words worth keeping";
+  document.body.appendChild(field);
+  field.selectionStart = 0;
+  field.selectionEnd = 4;
+  field.dispatchEvent(new MouseEvent("contextmenu",
+    { bubbles: true, cancelable: true, clientX: 120, clientY: 120 }));
+
+  const labels = [...menu.querySelectorAll(".menu-item")]
+    .map((el) => el.textContent.trim());
+  field.remove();
+  if (!menu.classList.contains("show")) {
+    return "right clicking a text field still opens nothing";
+  }
+  const missing = ["Cut", "Copy", "Paste", "Select All"]
+    .filter((wanted) => !labels.some((label) => label.startsWith(wanted)));
+  return missing.length === 0 ? true
+    : "a text field's menu did not offer: " + missing.join(", ");
+});
+
+check("selected text is offered a copy, even where the browser cannot select", () => {
+  // A headless browser holds no text selection, so this cannot be driven
+  // through getSelection here. The decision is checked directly instead:
+  // pretending otherwise would be a check that proves nothing and reads
+  // as though it proves something.
+  resetForCheck("manga");
+  const block = document.createElement("p");
+  block.textContent = "a line the agent wrote";
+  const items = textMenuItems(block, "a line the agent wrote");
+  if (!items) return "text with a selection was offered no menu at all";
+  const labels = items.filter((i) => i !== "-").map((i) => i.label);
+  return labels.length === 1 && labels[0] === "Copy" ? true
+    : "expected only a copy option, got: " + labels.join(", ");
+});
+
+check("a right click with nothing to act on is left alone", () => {
+  resetForCheck("manga");
+  const menu = document.querySelector(".menu-drop");
+  menu.classList.remove("show");
+  window.getSelection().removeAllRanges();
+
+  const empty = document.createElement("div");
+  document.body.appendChild(empty);
+  empty.dispatchEvent(new MouseEvent("contextmenu",
+    { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+  const opened = menu.classList.contains("show");
+  empty.remove();
+  return !opened ? true
+    : "a menu of nothing useful was offered on empty space";
+});
+
+check("the menu on a selected layer offers cut and copy", () => {
+  resetForCheck("manga");
+  const menu = document.querySelector(".menu-drop");
+  const shape = addLayer("rect", { x: 40, y: 40, w: 120, h: 120 });
+  select(shape.id);
+  showContextMenu(100, 100, contextItemsForSelection());
+
+  const labels = [...menu.querySelectorAll(".menu-item")]
+    .map((el) => el.textContent.trim());
+  const missing = ["Cut", "Copy", "Duplicate", "Delete"]
+    .filter((wanted) => !labels.some((label) => label.startsWith(wanted)));
+  return missing.length === 0 ? true
+    : "the menu did not offer: " + missing.join(", ");
+});
+
+check("the update notice appears, and offers to restart once ready", async () => {
+  // This path only runs when a real update arrives, so nothing exercised
+  // it: the first draft called a save function that does not exist and
+  // would have thrown the moment an update was found.
+  resetForCheck("manga");
+  const banner = document.getElementById("update-banner");
+  const text = document.getElementById("update-text");
+  const act = document.getElementById("update-act");
+  if (!banner) return "there is no update banner in the page";
+  if (!window.__updateHandler) return "nothing is listening for update news";
+
+  window.__updateHandler({ state: "available", version: "9.9.9" });
+  if (!banner.classList.contains("show")) return "an available update said nothing";
+  if (!text.textContent.includes("9.9.9")) {
+    return "the notice did not name the version: " + text.textContent;
+  }
+
+  window.__updateHandler({ state: "downloading", percent: 42 });
+  if (!text.textContent.includes("42")) return "progress was not shown";
+
+  window.__updateHandler({ state: "ready", version: "9.9.9" });
+  if (!/restart/i.test(act.textContent)) {
+    return "a ready update did not offer a restart: " + act.textContent;
+  }
+
+  // A failed check must not nag: the application still works.
+  window.__updateHandler({ state: "failed", detail: "no network" });
+  return !banner.classList.contains("show") ? true
+    : "a failed update check left a notice on screen";
+});
+
 check("a name that is not in the cast does not silently anchor the art", () => {
   // Raised by the automated review: nothing covered a panel naming
   // somebody who has been renamed or deleted. It falls back to the

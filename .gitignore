@@ -33,3 +33,6 @@ studio/.editor.original
 
 # bench results, not source
 bench-output/
+
+# a contact sheet for eyeballing the icon, not a source file
+build/icon-preview.png

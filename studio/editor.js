@@ -1,4 +1,4 @@
-/* prod-imagen studio — editor core (v0.3)
+/* Firestarter — editor core (v0.3)
    Model: document -> pages -> layers. The layers list is the source of
    truth; the Konva canvas renders it. All lettering is vector text.
    v0.3: brush + eraser, shapes, image import + crop, multi-select,
@@ -7,14 +7,73 @@
 
 // Where the generation server lives. Local by default; a deployed one
 // can be named in Settings, with a bearer token when it is protected.
-let SERVER = localStorage.getItem("studio-server") || "http://127.0.0.1:8787";
+/* Where the backend is.
+
+   Three places, most specific first: what this person set in Settings,
+   what the build was shipped pointing at, then a server on this machine.
+   A shipped copy therefore works without being configured, while a
+   developer's copy still prefers the one they are running locally.
+
+   The url is baked in because it is public. The token is not: it is
+   asked for on first run, so each person has their own and one leaking
+   is something to revoke rather than a reason to rebuild. */
+let DEPLOYMENT = { server: "", signup: "" };
+try {
+  // eslint-disable-next-line
+  DEPLOYMENT = { ...DEPLOYMENT, ...require("./deployment.json") };
+} catch (_) {
+  try {
+    const el = document.getElementById("deployment");
+    if (el) DEPLOYMENT = { ...DEPLOYMENT, ...JSON.parse(el.textContent || "{}") };
+  } catch (__) { /* shipped without one; local it is */ }
+}
+let SERVER = localStorage.getItem("studio-server")
+  || DEPLOYMENT.server
+  || "http://127.0.0.1:8787";
 let SERVER_TOKEN = localStorage.getItem("studio-token") || "";
+
+/* Every call to the backend, and a word about the slow ones.
+
+   A hosted backend on a free plan sleeps once nobody has used it for a
+   while and takes most of a minute to wake. Unsaid, the first action of a
+   session simply hangs, and the application looks broken when it is only
+   waiting. Anything still unanswered after a few seconds explains itself
+   and stops as soon as a reply arrives. A server on this machine answers
+   long before the message would ever appear. */
+// Not a constant so a check can shorten it. The suite runs the page under
+// a few seconds of virtual time in total, so a check that actually waited
+// four of them would bring the whole run down; that mistake has been made
+// here once already.
+let WAKING_AFTER_MS = 4000;
+let wakingCalls = 0;
+
+function showWaking(show) {
+  const box = document.getElementById("waking");
+  if (box) box.classList.toggle("show", Boolean(show));
+}
 
 function api(path, options) {
   const settings = options || {};
   const headers = { ...(settings.headers || {}) };
   if (SERVER_TOKEN) headers.Authorization = "Bearer " + SERVER_TOKEN;
-  return fetch(SERVER.replace(/\/+$/, "") + path, { ...settings, headers });
+  const remote = !/127\.0\.0\.1|localhost/.test(SERVER);
+
+  let timer = null;
+  if (remote) {
+    wakingCalls += 1;
+    timer = setTimeout(() => showWaking(true), WAKING_AFTER_MS);
+  }
+  const settled = () => {
+    if (!remote) return;
+    clearTimeout(timer);
+    wakingCalls = Math.max(0, wakingCalls - 1);
+    // Only once nothing else is still waiting. A page of panels would
+    // otherwise flicker the message on and off as each one lands.
+    if (wakingCalls === 0) showWaking(false);
+  };
+  return fetch(SERVER.replace(/\/+$/, "") + path, { ...settings, headers })
+    .then((response) => { settled(); return response; },
+          (error) => { settled(); throw error; });
 }
 
 // Outside Electron (a browser, a test harness) the preload bridge does
@@ -32,6 +91,10 @@ if (!window.studio) {
     setUnsaved: () => {}, closeNow: () => {},
     newProjectWindow: unavailable, openProjectFile: unavailable,
     saveKeys: unavailable, loadKeys: async () => ({}), win: () => {}, onMenu: null,
+    // Outside a packaged application there is nothing to update, so these
+    // are quiet no-ops rather than absent: the banner asks for them
+    // unconditionally and must not throw in a browser or a check.
+    onUpdateStatus: () => {}, downloadUpdate: unavailable, installUpdate: unavailable,
   };
 }
 
@@ -1949,6 +2012,84 @@ stage.container().addEventListener("contextmenu", (event) => {
     showContextMenu(event.clientX, event.clientY, contextItemsForCanvas());
   }
 });
+/* Right clicking anything that is not the canvas.
+
+   Electron ships no context menu of its own, anywhere. The canvas had
+   one, so cutting and copying a shape worked, while right clicking the
+   agent's reply or a prompt field produced nothing at all: no copy, no
+   paste, no select all. In a browser those come free, which makes them
+   easy to forget when building a window from scratch.
+
+   Editable fields get the full set, selected text gets copy, and a right
+   click with nothing to act on is left alone rather than answered with a
+   menu of greyed out items. */
+/* What a right click somewhere other than the canvas should offer.
+
+   Separated from the event so it can be checked. A headless browser will
+   not hold a text selection, so driving this through getSelection proves
+   nothing there; passing the selection in means the decision is testable
+   even where the browser cannot make one. */
+function textMenuItems(target, selected) {
+  if (!target || !target.matches) return null;
+  const editable = target.matches("input, textarea, [contenteditable=true]");
+  if (!editable && !selected) return null;            // nothing worth offering
+
+  const items = [];
+  if (editable && "selectionStart" in target) {
+    const field = target;
+    const nothingChosen = field.selectionStart === field.selectionEnd;
+    const chosen = () => String(field.value || "")
+      .slice(field.selectionStart, field.selectionEnd);
+    const replace = (text) => {
+      const from = field.selectionStart;
+      const to = field.selectionEnd;
+      field.value = field.value.slice(0, from) + text + field.value.slice(to);
+      field.selectionStart = field.selectionEnd = from + text.length;
+      // so anything watching the field reacts as if it had been typed
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    items.push({
+      label: "Cut", accel: "Ctrl+X", disabled: nothingChosen,
+      run: async () => {
+        const text = chosen();
+        if (!text) return;
+        await navigator.clipboard.writeText(text);
+        replace("");
+      },
+    });
+    items.push({
+      label: "Copy", accel: "Ctrl+C", disabled: nothingChosen,
+      run: () => navigator.clipboard.writeText(chosen()),
+    });
+    items.push({
+      label: "Paste", accel: "Ctrl+V",
+      run: async () => {
+        const text = await navigator.clipboard.readText();
+        if (text) replace(text);
+      },
+    });
+    items.push("-");
+    items.push({ label: "Select All", accel: "Ctrl+A", run: () => field.select() });
+  } else {
+    items.push({
+      label: "Copy", accel: "Ctrl+C",
+      run: () => navigator.clipboard.writeText(selected),
+    });
+  }
+  return items;
+}
+
+document.addEventListener("contextmenu", (event) => {
+  const target = event.target;
+  if (!target || (stage.container().contains && stage.container().contains(target))) {
+    return;                                           // the canvas has its own
+  }
+  const items = textMenuItems(target, String(window.getSelection() || "").trim());
+  if (!items) return;
+  event.preventDefault();
+  showContextMenu(event.clientX, event.clientY, items);
+});
+
 document.addEventListener("click", hideContextMenu);
 document.addEventListener("keydown", (event) => { if (event.key === "Escape") hideContextMenu(); });
 window.addEventListener("blur", hideContextMenu);
@@ -3766,13 +3907,40 @@ document.getElementById("win-min").onclick = () => window.studio.win("min");
 document.getElementById("win-max").onclick = () => window.studio.win("max");
 document.getElementById("win-close").onclick = () => window.studio.win("close");
 
-const savedTheme = localStorage.getItem("studio-theme");
-if (savedTheme) document.documentElement.dataset.theme = savedTheme;
-document.getElementById("theme-toggle").onclick = () => {
-  const next = document.documentElement.dataset.theme === "light" ? "" : "light";
-  if (next) document.documentElement.dataset.theme = next;
+/* Three looks, cycled by one button.
+
+   Dark is the default and carries no value, which is what the button used
+   to toggle against. A third means the order has to be written down
+   rather than inferred from a comparison, or a value nobody anticipated
+   leaves the button doing nothing at all. */
+const THEMES = ["", "light", "fire"];
+const THEME_NAMES = { "": "Dark", light: "Light", fire: "Fire" };
+
+function nextTheme(current) {
+  const at = THEMES.indexOf(current || "");
+  return THEMES[((at < 0 ? 0 : at) + 1) % THEMES.length];
+}
+
+function applyTheme(theme) {
+  const wanted = THEMES.includes(theme || "") ? (theme || "") : "";
+  if (wanted) document.documentElement.dataset.theme = wanted;
   else delete document.documentElement.dataset.theme;
-  localStorage.setItem("studio-theme", next);
+  const button = document.getElementById("theme-toggle");
+  // says what pressing it will do, rather than what is already on screen
+  if (button) {
+    button.title = `${THEME_NAMES[wanted]} theme. `
+      + `Switch to ${THEME_NAMES[nextTheme(wanted)]}.`;
+  }
+  return wanted;
+}
+
+// A value stored by an older version, or edited by hand, must not leave
+// the window in a look that has no styles behind it.
+applyTheme(localStorage.getItem("studio-theme") || "");
+
+document.getElementById("theme-toggle").onclick = () => {
+  const chosen = applyTheme(nextTheme(document.documentElement.dataset.theme || ""));
+  localStorage.setItem("studio-theme", chosen);
 };
 
 async function sendChat(overrideText, quiet) {
@@ -3940,7 +4108,7 @@ document.getElementById("chat-input").addEventListener("keydown", (event) => {
 
 // ------------------------------------------------------------------ init --
 document.getElementById("project-title").textContent = doc.name;
-document.title = `${doc.name} — prod-imagen studio`;
+document.title = `${doc.name} — Firestarter`;
 document.querySelectorAll(".dock-tab").forEach((tab) => {
   tab.addEventListener("click", () => {
     document.querySelectorAll(".dock-tab").forEach((t) => t.classList.remove("active"));
@@ -4102,6 +4270,72 @@ document.getElementById("no-engine-settings").onclick = () => {
 };
 document.getElementById("no-engine-dismiss").onclick = () =>
   document.getElementById("no-engine").classList.remove("show");
+
+/* An update, said in the window instead of by the operating system.
+
+   A desktop notification arrives while somebody is drawing and is gone
+   before they look up. This waits in the corner until it is dealt with,
+   and never installs anything unasked: the download is a choice, and
+   restarting is a second choice made after the work is saved. */
+(function watchForUpdates() {
+  const banner = document.getElementById("update-banner");
+  const text = document.getElementById("update-text");
+  const act = document.getElementById("update-act");
+  const later = document.getElementById("update-later");
+  if (!banner || !window.studio.onUpdateStatus) return;
+
+  let pending = null;
+  const hide = () => banner.classList.remove("show");
+  later.onclick = hide;
+
+  const show = (message, button, onClick) => {
+    text.textContent = message;
+    act.textContent = button || "";
+    act.style.display = button ? "" : "none";
+    act.onclick = onClick || null;
+    banner.classList.add("show");
+  };
+
+  const onStatus = (detail) => {
+    if (!detail) return;
+    if (detail.state === "available") {
+      pending = detail.version;
+      show(`Version ${detail.version} is available.`, "Download",
+        async () => {
+          show(`Downloading ${pending}...`, null, null);
+          const result = await window.studio.downloadUpdate();
+          if (result && result.ok === false) {
+            show("The download did not finish.", "Try again",
+              () => window.studio.downloadUpdate());
+          }
+        });
+    } else if (detail.state === "downloading") {
+      show(`Downloading update: ${detail.percent}%`, null, null);
+    } else if (detail.state === "ready") {
+      show(`Version ${detail.version} is ready.`, "Restart now", async () => {
+        // The work is saved before the application is replaced. Losing a
+        // page to an update would be an unusually poor trade. Saving goes
+        // through the button, which is the only thing that knows whether
+        // this document has a path yet or needs to ask for one.
+        if (savedSnapshot !== snapshotDoc()) {
+          const saved = await document.getElementById("save").onclick();
+          if (!saved) return;              // they cancelled; keep the banner
+        }
+        window.studio.installUpdate();
+      });
+    } else if (detail.state === "failed") {
+      // Not worth interrupting anybody over: the application works, it
+      // simply could not reach the update server.
+      hide();
+    }
+  };
+
+  // Exposed so a check can drive it. This path only runs when a real
+  // update exists, so without a way in it was shipping unexercised, and
+  // the first draft of it called a function that does not exist.
+  window.__updateHandler = onStatus;
+  window.studio.onUpdateStatus(onStatus);
+})();
 
 setupRulerDragging();
 drawGuides();
