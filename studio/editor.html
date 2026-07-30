@@ -30,6 +30,24 @@
       --page-bloom: 0 1px 2px rgba(20,18,24,0.08), 0 14px 44px rgba(20,18,24,0.12);
       --grain-opacity: 0.03;
     }
+    /* Fire. The dark layout with the cool cast taken out: the greys carry
+       a little red so they sit under an ember accent instead of fighting
+       it, and the page glows warm rather than white.
+
+       The page itself stays true white in every theme. A warm cast on the
+       artwork would be a lie about what gets exported, and someone would
+       colour against it and wonder why the print looked wrong. */
+    :root[data-theme="fire"] {
+      --bg: #0d0705; --surface: #17100c; --surface-2: #1e1510; --surface-3: #281b14;
+      --hairline: rgba(255,206,168,0.10); --hairline-strong: rgba(255,206,168,0.20);
+      --edge: rgba(255,196,150,0.26); --edge-w: 1px;
+      --ink: #f4e9e2; --ink-2: rgba(244,233,226,0.64); --ink-3: rgba(244,233,226,0.44);
+      --accent-deep: #7d2a12; --accent: #d9541f; --accent-glow: #ff8a2e;
+      --accent-soft: rgba(217,84,31,0.20);
+      --good: #6a9e52; --bad: #d64a3a;
+      --page-bloom: 0 0 46px rgba(255,150,70,0.13), 0 10px 40px rgba(0,0,0,0.62);
+      --grain-opacity: 0.06;
+    }
     * { box-sizing: border-box; margin: 0; user-select: none; }
     ::-webkit-scrollbar { width: 8px; height: 8px; }
     ::-webkit-scrollbar-track { background: transparent; }

@@ -10,6 +10,7 @@ MANIFEST
 README.md
 build/icon.ico
 build/icon.png
+build/make-icon.py
 docker-compose.yml
 render.yaml
 server/Dockerfile

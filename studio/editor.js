@@ -3907,13 +3907,40 @@ document.getElementById("win-min").onclick = () => window.studio.win("min");
 document.getElementById("win-max").onclick = () => window.studio.win("max");
 document.getElementById("win-close").onclick = () => window.studio.win("close");
 
-const savedTheme = localStorage.getItem("studio-theme");
-if (savedTheme) document.documentElement.dataset.theme = savedTheme;
-document.getElementById("theme-toggle").onclick = () => {
-  const next = document.documentElement.dataset.theme === "light" ? "" : "light";
-  if (next) document.documentElement.dataset.theme = next;
+/* Three looks, cycled by one button.
+
+   Dark is the default and carries no value, which is what the button used
+   to toggle against. A third means the order has to be written down
+   rather than inferred from a comparison, or a value nobody anticipated
+   leaves the button doing nothing at all. */
+const THEMES = ["", "light", "fire"];
+const THEME_NAMES = { "": "Dark", light: "Light", fire: "Fire" };
+
+function nextTheme(current) {
+  const at = THEMES.indexOf(current || "");
+  return THEMES[((at < 0 ? 0 : at) + 1) % THEMES.length];
+}
+
+function applyTheme(theme) {
+  const wanted = THEMES.includes(theme || "") ? (theme || "") : "";
+  if (wanted) document.documentElement.dataset.theme = wanted;
   else delete document.documentElement.dataset.theme;
-  localStorage.setItem("studio-theme", next);
+  const button = document.getElementById("theme-toggle");
+  // says what pressing it will do, rather than what is already on screen
+  if (button) {
+    button.title = `${THEME_NAMES[wanted]} theme. `
+      + `Switch to ${THEME_NAMES[nextTheme(wanted)]}.`;
+  }
+  return wanted;
+}
+
+// A value stored by an older version, or edited by hand, must not leave
+// the window in a look that has no styles behind it.
+applyTheme(localStorage.getItem("studio-theme") || "");
+
+document.getElementById("theme-toggle").onclick = () => {
+  const chosen = applyTheme(nextTheme(document.documentElement.dataset.theme || ""));
+  localStorage.setItem("studio-theme", chosen);
 };
 
 async function sendChat(overrideText, quiet) {

@@ -1864,6 +1864,52 @@ check("a server on this machine is never described as waking", async () => {
   return true;
 });
 
+check("the theme button cycles all three looks and remembers the choice", () => {
+  // Dark carries no value, which is what a two-state toggle compared
+  // against. A third look means the order has to be written down, or an
+  // unanticipated value leaves the button doing nothing.
+  const button = document.getElementById("theme-toggle");
+  if (!button) return "there is no theme button";
+  const started = document.documentElement.dataset.theme || "";
+
+  applyTheme("");
+  const seen = [];
+  for (let i = 0; i < 4; i += 1) {
+    button.onclick();
+    seen.push(document.documentElement.dataset.theme || "dark");
+  }
+  applyTheme(started);
+
+  const expected = ["light", "fire", "dark", "light"];
+  if (JSON.stringify(seen) !== JSON.stringify(expected)) {
+    return "cycled through " + seen.join(", ") + " instead of " + expected.join(", ");
+  }
+  return localStorage.getItem("studio-theme") === "light" ? true
+    : "the choice was not remembered";
+});
+
+check("a theme nobody has styles for falls back rather than breaking", () => {
+  const started = document.documentElement.dataset.theme || "";
+  const settled = applyTheme("chartreuse-mode");
+  applyTheme(started);
+  return settled === "" ? true
+    : "an unknown theme was applied as " + JSON.stringify(settled);
+});
+
+check("the fire theme actually restyles the window", () => {
+  const started = document.documentElement.dataset.theme || "";
+  applyTheme("");
+  const dark = getComputedStyle(document.documentElement)
+    .getPropertyValue("--accent").trim();
+  applyTheme("fire");
+  const fire = getComputedStyle(document.documentElement)
+    .getPropertyValue("--accent").trim();
+  applyTheme(started);
+  if (!fire) return "the fire theme defines no accent colour";
+  return fire !== dark ? true
+    : "fire and dark share the same accent, so nothing would look different";
+});
+
 check("right clicking the canvas actually opens the menu", () => {
   // The existing check called the menu's actions directly, so it proved
   // the actions work and never proved the menu opens. Reported broken
