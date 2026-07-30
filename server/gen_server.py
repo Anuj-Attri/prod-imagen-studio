@@ -38,7 +38,7 @@ HOST = os.environ.get("STUDIO_HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT") or os.environ.get("STUDIO_PORT") or "8787")
 # Reported by /health so a stale server left running on the port is
 # obvious instead of silently serving old code.
-BUILD = "0.6.0"
+BUILD = "0.6.1"
 KEYS_PATH = Path(__file__).with_name("keys.json")
 AUTH_TOKEN = os.environ.get("STUDIO_AUTH_TOKEN")
 
@@ -591,6 +591,11 @@ AGENT_SYSTEM = (
     "balloons in the same panel when that is how they would say it. "
     "Reserve wordless panels for the ones that are carrying weight, and "
     "make sure something in the story changes in them. "
+    "If the context carries a researched_style, it was looked up for this "
+    "request and describes how the named works are actually drawn. Treat it "
+    "as fact and put its tags_to_use into every panel prompt; prefer it over "
+    "your own impression of those works, and never contradict its avoid "
+    "list. If its confidence is low, lean on the user's own words instead. "
     "If the context carries a story_so_far, this work already has a "
     "narrative: continue it rather than restarting, keep established "
     "facts intact, and do not contradict anything already on the pages. "
@@ -708,6 +713,30 @@ def parse_agent_json(text: str) -> dict:
 
 
 def agent_chat(payload: dict, current: dict) -> dict:
+    """Build pages from a brief, having first found out what it refers to.
+
+    Naming a work is how people describe what they want to see, and it is
+    the one thing a model cannot supply from the name alone. So whatever the
+    brief points at is looked up before any panel is written, and what comes
+    back is handed over as fact rather than left to recollection.
+
+    Bounded, and never fatal. A lookup that overruns is abandoned for this
+    page and finishes in the background, so the next page of the chapter has
+    it. A page that is slightly less faithful beats a page that never
+    arrives.
+    """
+    latest = ""
+    for message in reversed(payload.get("messages") or []):
+        if isinstance(message, dict) and message.get("role") == "user":
+            latest = str(message.get("content", ""))
+            break
+    studied = None
+    if current.get("openrouter") and latest:
+        try:
+            studied = reference.research_for_bounded(latest, current["openrouter"])
+        except Exception:
+            studied = None          # never at the cost of the page itself
+
     context = json.dumps({
         "project": payload.get("project"),
         "kind": payload.get("kind"),
@@ -715,6 +744,15 @@ def agent_chat(payload: dict, current: dict) -> dict:
         "existing_cast": payload.get("cast", []),
         "story_so_far": payload.get("story"),
         "pages": payload.get("pages", []),
+        # Only present when something was actually found, so the model is
+        # never handed an empty field to read meaning into.
+        **({"researched_style": {
+            "works": studied.get("names"),
+            "confidence": studied.get("confidence"),
+            "how_it_is_drawn": studied.get("notes"),
+            "tags_to_use": studied.get("tags"),
+            "avoid": studied.get("avoid"),
+        }} if studied else {}),
     })
     # Anything may arrive over the wire: a string where a list belongs, or
     # entries that are not objects. Neither should become a 500.
