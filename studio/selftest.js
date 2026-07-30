@@ -2246,6 +2246,72 @@ check("a panel with nobody in it still gets its own art", () => {
     : "two empty panels would have produced identical art";
 });
 
+// ------------------------------------------------------------ chapter mode --
+check("asking for a chapter is recognised, and a single page is not", () => {
+  const wants = [
+    ["An 8-page manga chapter about a climb", 8],
+    ["draw me a 12 page chapter", 12],
+    ["make an eight-page chapter", 8],
+    ["a three page sequence", 3],
+    ["build a chapter of this", 6],          // no number: the default
+    ["one page of two people talking", 0],
+    ["draw this page again", 0],
+    ["a poster for the festival", 0],
+    ["add a balloon here", 0],
+    ["make it darker", 0],
+  ];
+  // Plain concatenation, no template literals: these checks are injected
+  // into the page inside a template literal, so a backtick here ends the
+  // wrong string and the whole self-test stops parsing.
+  for (const pair of wants) {
+    const got = pagesAskedFor(pair[0]);
+    if (got !== pair[1]) {
+      return '"' + pair[0] + '" asked for ' + pair[1]
+        + " pages, read as " + got;
+    }
+  }
+  // Bounded at both ends: a slip of the keyboard must not start a hundred
+  // image generations.
+  if (pagesAskedFor("a 900 page chapter") > 24) {
+    return "an absurd page count was taken at face value";
+  }
+  return true;
+});
+
+check("every panel count the planner may ask for can actually be drawn", () => {
+  // The planner is allowed to return 1 to 9. A count with no template
+  // silently loses panels: the page is laid out for as many as the table
+  // knows and the rest of the beats are dropped without a word.
+  for (let count = 1; count <= 9; count += 1) {
+    const rects = pageLayout(count);
+    if (rects.length !== count) {
+      return "a " + count + " panel page laid out "
+        + rects.length + " panels";
+    }
+    if (rects.some((r) => !r.w || !r.h || r.w < 0 || r.h < 0)) {
+      return "a " + count + " panel page produced an unusable rectangle";
+    }
+  }
+  return true;
+});
+
+check("a page keeps its own name rather than the one before it", () => {
+  // The chapter loop names each page after its beat. If addPage copied or
+  // shared a name, the strip would show one beat repeated down the whole
+  // chapter and nobody could tell the pages apart.
+  resetForCheck("manga");
+  addLayer("panel", { x: 0, y: 0, w: 100, h: 100 });
+  currentPage().name = "1. He is beaten";
+  addPage(false);
+  addLayer("panel", { x: 0, y: 0, w: 100, h: 100 });
+  currentPage().name = "2. Someone below shouts";
+  if (doc.pages.length !== 2) {
+    return "expected 2 pages, got " + doc.pages.length;
+  }
+  return doc.pages[0].name !== doc.pages[1].name ? true
+    : "both pages ended up with the same name";
+});
+
 runChecks().then(() => {
   document.title = "SELFTEST " + JSON.stringify(window.__results);
 });

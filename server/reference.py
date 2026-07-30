@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import urllib.error
 import urllib.request
@@ -46,9 +47,29 @@ confidence rather than inventing a plausible answer: a made-up style
 description is worse than none, because it will be believed."""
 
 
+# Which works a request is pointing at. Its own instruction, because it is
+# its own question.
+#
+# This call used to be given the style-description prompt above — the one
+# demanding linework, rendering, palette and tags — and then asked, in the
+# user turn, for {"names": [...]}. Two contradictory contracts in one
+# request. Often enough the model obeyed the system prompt, returned a style
+# object with no "names" key, and the caller read that as "no references
+# named here" and skipped the research entirely. Intermittent by nature, and
+# indistinguishable from a brief that genuinely named nothing.
+NAMES_SYSTEM = """You identify works by name. Answer only as JSON:
+
+{"names": ["..."]}
+
+List the specific manga, comic, film, artist or named visual style the
+request wants the art to resemble. An empty list if it names none. Never
+include generic words like manga, anime, comic, realistic or cinematic: those
+are categories, not works. Do not explain, do not add other keys."""
+
+
 def _ask(model: str, messages: list, key: str, timeout: int = 240,
-         blunt: bool = False) -> dict:
-    system = SYSTEM
+         blunt: bool = False, system: str | None = None) -> dict:
+    system = SYSTEM if system is None else system
     if blunt:
         # A second attempt, for a model that answered in prose. Asking
         # again more plainly is cheaper and more reliable than parsing
@@ -94,6 +115,29 @@ def _ask(model: str, messages: list, key: str, timeout: int = 240,
     return json.loads(text[start:end + 1])
 
 
+# A model that searched the web cites what it found, and the citations
+# survive being shaped into JSON. Harmless in a field somebody reads and not
+# harmless at all in one that is concatenated into an image prompt: an image
+# model handed "gritty ink weight [comicbook.com](https://...)" draws the url.
+_LINK = re.compile(r"\[([^\]]*)\]\((?:https?|www)[^)]*\)")
+_BARE_URL = re.compile(r"\(?(?:https?://|www\.)\S+\)?")
+_CITATION = re.compile(r"\[\s*\d+\s*\]")
+
+
+def _clean(value):
+    """Strip citations out of anything on its way into a prompt."""
+    if isinstance(value, list):
+        return [_clean(item) for item in value]
+    if not isinstance(value, str):
+        return value
+    text = _LINK.sub(r"\1", value)
+    text = _BARE_URL.sub("", text)
+    text = _CITATION.sub("", text)
+    # the punctuation left stranded where a citation used to be
+    text = re.sub(r"\s+([,.;])", r"\1", text)
+    return re.sub(r"\s{2,}", " ", text).strip(" ,;")
+
+
 def _ask_twice(model: str, messages: list, key: str) -> dict:
     """One retry, phrased more bluntly.
 
@@ -108,19 +152,72 @@ def _ask_twice(model: str, messages: list, key: str) -> dict:
         return _ask(model, messages, key, blunt=True)
 
 
+def _ask_prose(model: str, prompt: str, key: str, timeout: int = 240) -> str:
+    """Ask a question and take the answer in whatever form it arrives.
+
+    No JSON, no schema, no format instruction. This exists because the model
+    doing the searching should not also be responsible for the shape of the
+    reply: a web-search model narrates what it found, which is the correct
+    behaviour for a search and the wrong shape for a contract.
+    """
+    body = json.dumps({
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 1400,
+    }).encode()
+    request = urllib.request.Request(OPENROUTER_CHAT, data=body, headers={
+        "Authorization": "Bearer " + key,
+        "Content-Type": "application/json",
+        "X-Title": "Firestarter reference",
+    })
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        payload = json.loads(response.read())
+    message = (payload.get("choices") or [{}])[0].get("message") or {}
+    for field in ("content", "reasoning"):
+        candidate = (message.get(field) or "").strip()
+        if candidate:
+            return candidate
+    raise RuntimeError(f"{model} replied with nothing")
+
+
 def style_from_name(name: str, key: str) -> dict:
     """Research a named work and describe how it looks.
 
-    Uses a model with web access, because the whole point is the part the
-    model does not already know. OpenRouter exposes that by suffixing a
-    model with :online.
+    Two calls, because they are two different jobs. One model searches the
+    web and writes about what it found; a second turns that into the fields
+    the rest of the application reads.
+
+    It was one call, and it never once worked. The searching model was told
+    to answer in JSON — asked in words and again at the protocol level with
+    response_format — and answered in prose anyway, both times, on both
+    attempts, taking about a minute to do it. research_for swallows a failed
+    lookup by design, so every chapter was planned and drawn with no style
+    information at all and nothing said so. The gate fired, the names were
+    found correctly, and the answer was thrown away at the last step.
+
+    A search model narrating its findings is not a malfunction, it is what
+    searching produces. Making it hold a contract as well was the mistake,
+    and no amount of asking more bluntly fixes it.
     """
-    base = routing.model_for("critique")["model"] or "openai/gpt-5-mini"
+    base = routing.model_for("research")["model"] or "openai/gpt-5-mini"
     model = base if base.endswith(":online") else base + ":online"
-    found = _ask_twice(model, [{"role": "user", "content":
+    prose = _ask_prose(model, (
         f"Research the visual style of: {name}. Look it up rather than "
         f"recalling it. If it is a manga, comic, film or artist, find what "
-        f"is specifically said about how it is drawn."}], key)
+        f"is specifically said about how it is drawn: linework, rendering, "
+        f"use of tone, composition, what makes it recognisable. Quote what "
+        f"critics and readers say about the art. Be specific and concrete. "
+        f"If you cannot find it, say so plainly instead of describing "
+        f"something generic."
+    ), key)
+
+    shaper = routing.model_for("cast_tags")["model"] or "openai/gpt-5-mini"
+    found = _ask_twice(shaper, [{"role": "user", "content":
+        f"Here is research about the visual style of {name}. Convert it into "
+        f"the JSON fields. Use only what the research says; if it says the "
+        f"work could not be found, set confidence to low.\n\n{prose[:6000]}"
+    }], key)
+    found = {field: _clean(value) for field, value in found.items()}
     found["source"] = f"researched: {name}"
     found["model"] = model
     return found
@@ -232,16 +329,17 @@ def _names_in(text: str, key: str) -> list:
     model = routing.model_for("classify")["model"] or "openai/gpt-5-mini"
     try:
         found = _ask(model, [{"role": "user", "content":
-            "List any specific manga, comic, film, artist or named visual "
-            "style this request wants the art to resemble. Answer as JSON: "
-            '{"names": ["..."]}. An empty list if none are named. Do not '
-            "include generic words like manga, anime or realistic.\n\n"
-            + str(text or "")[:2000]}], key)
+            "Which works does this request want the art to resemble?\n\n"
+            + str(text or "")[:2000]}], key, system=NAMES_SYSTEM)
     except Exception:
         return []
     names = found.get("names")
     if not isinstance(names, list):
-        names = []
+        # Nothing under that key is not the same as nothing named: a model
+        # that answered in some other shape must not be recorded as a
+        # message with no references in it, or the miss is cached and every
+        # page of the chapter inherits it.
+        return []
     names = [str(n).strip() for n in names if str(n).strip()][:3]
     with _known_lock:
         _asked[memo] = list(names)
@@ -288,24 +386,45 @@ def research_for(text: str, key: str) -> dict | None:
     if not names:
         return None
 
+    # Looked up at the same time, not one after another. Each name costs
+    # about a minute, so three in series is three minutes and overruns any
+    # budget worth giving this; three at once costs about as long as one.
+    # They are independent lookups against a remote service, which is the
+    # case threads are actually good for.
     styles = []
+    pending = []
     for name in names:
         cached = name.strip().lower()
         with _known_lock:
             hit = _known.get(cached)
         if hit is not None:
             if hit:
-                styles.append(hit)
+                styles.append(hit)       # already known, or known to be futile
             continue
-        try:
-            found = style_from_name(name, key)
-        except Exception:
+        pending.append((name, cached))
+
+    if pending:
+        results = {}
+
+        def look_up(name, cached):
+            try:
+                results[cached] = style_from_name(name, key)
+            except Exception:
+                results[cached] = {}     # remembered as fruitless, not retried
+
+        workers = [threading.Thread(target=look_up, args=(name, cached),
+                                    daemon=True)
+                   for name, cached in pending]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join()
+        for _, cached in pending:
+            found = results.get(cached) or {}
             with _known_lock:
-                _known[cached] = {}       # remembered as fruitless, not retried
-            continue
-        with _known_lock:
-            _known[cached] = found
-        styles.append(found)
+                _known[cached] = found
+            if found:
+                styles.append(found)
 
     if not styles:
         return None

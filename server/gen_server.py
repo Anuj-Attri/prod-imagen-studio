@@ -38,7 +38,7 @@ HOST = os.environ.get("STUDIO_HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT") or os.environ.get("STUDIO_PORT") or "8787")
 # Reported by /health so a stale server left running on the port is
 # obvious instead of silently serving old code.
-BUILD = "0.6.2"
+BUILD = "0.6.3"
 KEYS_PATH = Path(__file__).with_name("keys.json")
 AUTH_TOKEN = os.environ.get("STUDIO_AUTH_TOKEN")
 
@@ -366,8 +366,23 @@ def ollama_base(cfg: dict):
 
 
 def llm_chat(current: dict, system: str, messages: list, max_tokens: int = 900,
-             json_mode: bool = False) -> str:
-    if local_llm_reachable(current):
+             json_mode: bool = False, step: str | None = None) -> str:
+    # A hosted key wins over a local model, every time.
+    #
+    # This was the other way round, and it quietly undid the entire routing
+    # layer: any machine with Ollama running got its chapter planned by
+    # whatever 8B model happened to be installed, while the tier table sat
+    # there choosing gpt-5.2 for a call that was never made. It looked like
+    # the planner being bad at planning. Every chapter plan tested on this
+    # desktop was local, dropped a page, ignored the numbered beats it was
+    # given, and answered "what changes" with nothing — and the deployed
+    # server, having no Ollama, was meanwhile behaving completely
+    # differently from the machine it was being developed on.
+    #
+    # Local generation stays reachable for somebody with no key at all,
+    # which is the only situation where it is the best available answer
+    # rather than a silent downgrade from one.
+    if not current.get("openrouter") and local_llm_reachable(current):
         cfg = llm_config(current)
         available = local_models(cfg)
         model = cfg["model"]
@@ -443,7 +458,11 @@ def llm_chat(current: dict, system: str, messages: list, max_tokens: int = 900,
         # this taught the server it had a backend it could not actually
         # use: every request failed saying there was no language backend
         # while a working key sat in the file.
-        step = "story" if max_tokens > 1200 else "beats"
+        # Guessing the step from the token budget is a rough proxy and was
+        # the only one available; a caller that knows what it is doing says
+        # so, and gets the tier that step is worth rather than the tier its
+        # length implies.
+        step = step or ("story" if max_tokens > 1200 else "beats")
         choice = routing.model_for(step)
         model = choice["model"] or "openai/gpt-5-mini"
         request = {
@@ -506,6 +525,19 @@ STORY_SYSTEM = (
 
 
 def analyze_story(payload: dict, current: dict) -> dict:
+    # Nothing to analyse is answered here rather than by a model. This step
+    # runs on the deep tier, so an empty request was buying the most
+    # expensive model available in order to be told there was no story yet.
+    # It also took long enough to do it that the check for this endpoint
+    # would intermittently time out, which is how it was noticed.
+    pages = payload.get("pages") or []
+    has_content = any(
+        (page.get("panels") or page.get("dialogue"))
+        for page in pages if isinstance(page, dict)
+    )
+    if not has_content:
+        return {"chapter": "", "overall": "", "flags": []}
+
     content = json.dumps({
         "project": payload.get("project"),
         "kind": payload.get("kind"),
@@ -767,6 +799,18 @@ def agent_chat(payload: dict, current: dict) -> dict:
     directive = LAYOUT_DIRECTIVES.get(payload.get("layout") or "panels", "")
     system = AGENT_SYSTEM + " " + directive + " Current project context: " + context
     layout = payload.get("layout") or "panels"
+
+    # A planned page is told how many panels it has, because the plan decided
+    # the chapter's rhythm and a page that quietly returns five panels every
+    # time flattens it back out.
+    try:
+        wanted_panels = int(payload.get("panels_wanted") or 0)
+    except (TypeError, ValueError):
+        wanted_panels = 0
+    wanted_panels = max(0, min(wanted_panels, 9))
+    if wanted_panels:
+        system += (f" This page has exactly {wanted_panels} panels. Not more,"
+                   f" not fewer.")
     result = parse_agent_json(llm_chat(current, system, messages,
                                        max_tokens=1400, json_mode=True))
     # A diagram project that came back as comic panels means the model
@@ -781,7 +825,7 @@ def agent_chat(payload: dict, current: dict) -> dict:
             current, system, messages + [{"role": "user", "content": BUILD_HINT}],
             max_tokens=1400, json_mode=True))
     panels = []
-    for panel in result["panels"][:8]:
+    for panel in result["panels"][:(wanted_panels or 8)]:
         if not isinstance(panel, dict) or not panel.get("prompt"):
             continue
         dialogue = [
@@ -845,6 +889,219 @@ def agent_chat(payload: dict, current: dict) -> dict:
         reply = f"Diagram with {len(nodes)} components."
     return {"reply": reply, "panels": panels, "cast": cast,
             "nodes": nodes, "edges": edges}
+
+
+# ------------------------------------------------------------ chapter plans --
+# A chapter is not a page repeated. Every page had been asked for on its own,
+# with no idea of the shape it sat inside, and the result read exactly like
+# that: eight pages of things looking dramatic and nothing happening, which
+# is what a page written without knowing what it has to accomplish looks
+# like.
+#
+# So the shape is decided once, in one cheap call, before any page is drawn.
+# Each page then gets told what it is for. It is the difference between "draw
+# a fight" eight times and "this is the page where he stops losing".
+PLAN_SYSTEM = """You plan the pages of a comic chapter before any of them are
+drawn. Answer only as JSON:
+
+{"title": "...",
+ "chapter": "what happens in this chapter, one paragraph",
+ "pages": [{"beat": "...", "changes": "...", "panels": 5}, ...]}
+
+For every page:
+
+  "beat"     what actually happens on it, in two to four sentences. Physical
+             events and what is said, not mood. "He gets up and walks into
+             the swing" is a beat; "tension builds" is not. One short line is
+             not enough to draw a page from: "the enemy sighs" describes a
+             panel, and you are describing a page that has to hold several.
+  "changes"  what is true in the world after this page that was not true
+             before it. A fact, not a feeling. "His guard hand is broken" is
+             a change; "he feels renewed confidence" is not, and neither is
+             anything about pride, determination, doubt or an inner fire.
+             If you cannot name a change, the page should not exist: delete
+             it and give its space to a page that earns one.
+  "panels"   how many panels, 1 to 9. Vary this hard between pages: a page of
+             nine small panels next to a page of two is what gives a chapter
+             its rhythm, and every page the same size reads flat. Do not let
+             the numbers climb or fall in order either — 1,2,3,4,5 is as
+             mechanical as 5,5,5,5,5. Few panels means a big moment, many
+             panels means fast exchange, so let the beat decide and check
+             afterwards that no two neighbours match.
+
+Rules:
+
+If the request already says what happens on which page, that is the plan.
+Follow it page for page and do not substitute an arc of your own. Given eight
+numbered beats, return those eight beats. You are being asked to break the
+work into pages, not to rewrite what somebody has already decided.
+
+Each page must move the situation. A page that could be removed without the
+reader losing anything is the wrong page.
+
+The aftermath is not the chapter. If the request builds to something, the
+build is the chapter and the moment lands at the end of it. Do not spend the
+back half on people reacting to what already happened: a page of someone
+standing in the wreckage feeling changed is the most common way a chapter
+turns into nothing happening.
+
+Escalate, and let it cost something. A reversal the reader saw coming is
+still a reversal, but it must be paid for.
+
+Spend the full-page moment once, on the page whose "changes" is the largest,
+and nowhere else.
+
+Do not invent character names unless the request gives them. Refer to people
+by role: the fighter, the one watching, the crowd.
+
+The pages array must hold exactly the number of pages asked for. Count the
+entries before you answer. A plan one page short is a plan for a different
+chapter, and the page it dropped is usually the one that mattered."""
+
+
+PLAN_RESEARCH_SECONDS = float(
+    os.environ.get("STUDIO_PLAN_RESEARCH_SECONDS", "200"))
+
+
+def plan_chapter(payload: dict, current: dict) -> dict:
+    """The shape of the whole chapter, decided once and cheaply.
+
+    Uses the fast tier: this is structure, not prose, and it is one call
+    against a request that is about to pay for a page of art per entry. The
+    expensive models are for the words and pictures a person actually reads.
+    """
+    wanted = payload.get("pages_wanted")
+    try:
+        wanted = int(wanted)
+    except (TypeError, ValueError):
+        wanted = 6
+    wanted = max(2, min(wanted, 24))
+    started = time.time()
+
+    brief = ""
+    for message in reversed(payload.get("messages") or []):
+        if isinstance(message, dict) and message.get("role") == "user":
+            brief = str(message.get("content", ""))[:MAX_PROMPT]
+            break
+    if not brief:
+        raise RuntimeError("a brief is required to plan a chapter")
+
+    # The lookup runs alongside the planning, not before it.
+    #
+    # Measured: forty-five seconds to work out which works are named, then
+    # about two minutes to research three of them. Waited for in sequence
+    # that is three minutes of nothing before a plan appears, and on a
+    # hundred and fifty second budget it was simply abandoned every time, so
+    # every chapter was planned and drawn knowing nothing about the work the
+    # request was mostly about.
+    #
+    # They do not need to be sequential. A plan is story structure — which
+    # page carries which beat — and that comes from the brief. It is the
+    # drawing that needs to know how the work is drawn. So the lookup starts
+    # here, the plan is written while it runs, and whatever has arrived by
+    # the time the plan is finished goes into the answer. Anything still in
+    # flight keeps going and lands in the cache, which is where every page
+    # of this chapter reads it from.
+    studied = {}
+    research = None
+    if current.get("openrouter"):
+        def look_up():
+            try:
+                studied["found"] = reference.research_for(
+                    brief, current["openrouter"])
+            except Exception:
+                pass
+        research = threading.Thread(target=look_up, daemon=True)
+        research.start()
+
+    context = json.dumps({
+        "kind": payload.get("kind"),
+        "art_style": payload.get("art_style"),
+        "existing_cast": payload.get("cast", []),
+        "story_so_far": payload.get("story"),
+        "pages_already_drawn": len(payload.get("pages") or []),
+    })
+
+    system = (PLAN_SYSTEM + f"\n\nPlan exactly {wanted} pages."
+              + " Project context: " + context)
+    # Budgeted per page, not as one flat number. A fixed 1800 was enough for
+    # terse beats and not enough for the two-to-four sentences the planner is
+    # now asked for: at eight pages the answer was cut off mid-string, and a
+    # truncated object is a JSON error rather than a short plan.
+    budget = min(900 + 320 * wanted, 8000)
+    raw = llm_chat(current, system, [{"role": "user", "content": brief}],
+                   max_tokens=budget, json_mode=True, step="page_plan")
+
+    start, end = raw.find("{"), raw.rfind("}")
+    if start < 0 or end <= start:
+        raise RuntimeError("the planner did not answer with JSON")
+    try:
+        plan = json.loads(raw[start:end + 1])
+    except json.JSONDecodeError as error:
+        # Said plainly, because the two causes need different responses and a
+        # decoder's "expecting ',' delimiter" tells nobody which one it is.
+        raise RuntimeError(
+            f"the plan came back incomplete ({error.msg}). It was cut off at "
+            f"{len(raw)} characters against a {budget} token budget. Ask for "
+            f"fewer pages, or raise the budget in plan_chapter."
+        ) from error
+
+    # A field asked for as a string comes back as a list about a third of the
+    # time, and as null when the model has nothing to say. str() on those
+    # produces "['The crowd loses interest']" and the literal word "None",
+    # and both went straight into the page listing a person reads before
+    # deciding whether to spend eight image generations on it.
+    def as_text(value: object) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, (list, tuple)):
+            return "; ".join(as_text(item) for item in value if item is not None)
+        if isinstance(value, dict):
+            return "; ".join(as_text(item) for item in value.values())
+        return str(value).strip()
+
+    pages = []
+    for page in (plan.get("pages") or []):
+        if not isinstance(page, dict):
+            continue
+        beat = as_text(page.get("beat"))
+        if not beat:
+            continue
+        try:
+            panels = int(page.get("panels") or 5)
+        except (TypeError, ValueError):
+            panels = 5
+        pages.append({
+            "beat": beat[:600],
+            "changes": as_text(page.get("changes"))[:300],
+            "panels": max(1, min(panels, 9)),
+        })
+    if not pages:
+        raise RuntimeError("the planner returned no pages")
+
+    # Give the lookup the rest of its budget now that the plan is written.
+    # Whatever is not ready keeps running and lands in the cache, so a page
+    # asked for a minute from now gets it even though this response could
+    # not.
+    if research is not None:
+        research.join(max(0.0, PLAN_RESEARCH_SECONDS - (time.time() - started)))
+    found = studied.get("found") or {}
+
+    # Asked for eight and given five is a plan for a different chapter. Short
+    # is reported rather than padded: inventing the missing pages here would
+    # produce exactly the empty pages the plan exists to prevent.
+    return {
+        "title": as_text(plan.get("title"))[:120],
+        "chapter": as_text(plan.get("chapter"))[:1200],
+        "pages": pages[:wanted],
+        "wanted": wanted,
+        "researched": found.get("names") or [],
+        "style_confidence": found.get("confidence") or "",
+        # True when the lookup is still going. Not the same as having found
+        # nothing, and the difference matters to somebody deciding whether to
+        # press draw now or wait: still running means the pages will have it.
+        "still_researching": bool(research is not None and research.is_alive()),
+    }
 
 
 # -------------------------------------------------------------------- server --
@@ -1053,6 +1310,8 @@ class Handler(BaseHTTPRequestHandler):
             self._story(payload)
         elif self.path == "/agent/chat":
             self._chat(payload)
+        elif self.path == "/agent/plan":
+            self._plan(payload)
         else:
             self._json(404, {"error": "unknown endpoint"})
 
@@ -1121,6 +1380,13 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"ok": True, **agent_chat(payload, current)})
         except Exception as error:
             self._json(500, {"error": f"{type(error).__name__}: {error}"})
+
+    def _plan(self, payload: dict) -> None:
+        current = keys()
+        try:
+            self._json(200, {"ok": True, **plan_chapter(payload, current)})
+        except Exception as error:
+            self._json(400, {"error": f"{type(error).__name__}: {error}"})
 
     def _story(self, payload: dict) -> None:
         current = keys()

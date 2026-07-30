@@ -67,7 +67,20 @@ TIER_FLOOR = {"fast": 0.0, "balanced": 3.0, "deep": 8.0}
 
 # Every step the orchestrator can run, and how much model it deserves.
 STEP_TIERS = {
-    "page_plan": "fast",         # how many panels, what shape
+    # The shape of a whole chapter, which every page and every image after it
+    # inherits. Filed as "fast" originally because it looked like structure
+    # work: how many panels, what shape. It is not. Asked on the cheap tier
+    # for an eight page chapter, it ignored the eight beats the brief had
+    # spelled out and returned five pages of the fighter feeling proud —
+    # eight image generations, every one of them earned by a plan that cost
+    # a fraction of a penny. This is the highest-leverage text call in the
+    # application, and one call per chapter is the cheapest place in it to
+    # spend real money.
+    "page_plan": "deep",
+    # Looking a work up on the web. Its own step rather than borrowing
+    # critique's model, because the requirement is different: this one has to
+    # search and read, and it is allowed to answer in prose.
+    "research": "balanced",
     "cast_tags": "fast",         # turning a description into tags
     "classify": "fast",
     "beats": "balanced",         # what happens in each panel

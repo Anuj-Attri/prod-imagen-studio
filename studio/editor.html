@@ -391,6 +391,14 @@
     .page-card.sel .cap { color: var(--ink); }
     .page-card .cap .kill { margin-left: auto; opacity: 0; }
     .page-card:hover .cap .kill { opacity: 1; }
+    /* What the page is for, under its thumbnail. Two lines at most: this is
+       a glance at the chapter's shape, not somewhere to read the beat. */
+    .page-card .page-beat {
+      font-size: 10px; line-height: 1.25; color: var(--ink-3);
+      margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .page-card.sel .page-beat { color: var(--ink-2); }
     /* ===== version history ===== */
     #history-list { display: flex; flex-direction: column; gap: 1px; }
     .hist-row {

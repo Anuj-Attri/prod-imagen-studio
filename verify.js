@@ -186,6 +186,32 @@ function waitForServer(port, timeoutMs) {
     }
   });
 
+  /* Every endpoint the renderer calls must exist on the server.
+
+     A mistyped or renamed path is a 404 at the moment somebody uses the
+     feature, and the renderer reports it as the agent being unavailable —
+     which is the same thing it says when the server is asleep, out of
+     credit, or genuinely broken. Nothing else compares the two sides: the
+     renderer parses, the server compiles, and the mismatch only exists in
+     the gap between them. Cheap to check, and this is the only place it can
+     be caught before an installer ships. */
+  step("every endpoint the renderer calls exists", () => {
+    const renderer = fs.readFileSync(path.join(root, "studio", "editor.js"), "utf-8");
+    const server = fs.readFileSync(path.join(root, "server", "gen_server.py"), "utf-8");
+    const called = [...new Set(argumentsOf(renderer, "api"))]
+      .filter((route) => route.startsWith("/"));
+    if (!called.length) {
+      throw new Error("no endpoints found in the renderer, so this check "
+        + "is no longer looking at anything");
+    }
+    const missing = called.filter((route) =>
+      !server.includes(`self.path == "${route}"`));
+    if (missing.length) {
+      throw new Error("the renderer calls endpoints the server does not "
+        + "answer: " + missing.join(", "));
+    }
+  });
+
   step("server compiles", () => python(["-m", "py_compile",
     ...["gen_server.py", "probe.py", "routing.py", "bench.py", "review.py",
         "limits.py", "video.py", "reference.py"]

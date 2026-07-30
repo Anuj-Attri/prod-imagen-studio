@@ -2722,12 +2722,21 @@ function renderPageGrid() {
     card.className = "page-card" + (index === pageIndex ? " sel" : "");
     card.draggable = true;
     const art = page.layers.find((l) => l.props && l.props.image);
+    // The page's name, not just its number. A planned chapter names each
+    // page after what happens on it, and this strip is the only place the
+    // shape of the whole thing is visible at once — twelve numbered
+    // thumbnails say nothing about which one is the turn.
+    // "Page 3" is what the number already says, so only a real name shows.
+    const named = /^page \d+$/i.test(String(page.name || "").trim())
+      ? "" : String(page.name || "").replace(/^\d+\.\s*/, "").trim();
+    card.title = named ? `${index + 1}. ${named}` : `Page ${index + 1}`;
     card.innerHTML =
       `<div class="shot">${art
         ? `<img alt="">`
         : `<span style="color:var(--ink-3);font-size:11px">empty</span>`}</div>` +
       `<div class="cap"><span>${index + 1}</span>` +
-      `<span class="kill mini" title="Delete page">x</span></div>`;
+      `<span class="kill mini" title="Delete page">x</span></div>` +
+      (named ? `<div class="page-beat">${escapeHtml(named)}</div>` : "");
     if (art) {
       const slot = card.querySelector("img");
       pageThumbnail(art.props.image, (small) => { if (small) slot.src = small; });
@@ -2970,10 +2979,16 @@ const PAGE_TEMPLATES = {
   6: [[1, [1, 1]], [1, [1, 1]], [1, [1, 1]]],
   7: [[1.15, [1]], [1, [1, 1]], [1, [1, 1]], [1, [1, 1]]],
   8: [[1, [1, 1]], [1, [1, 1]], [1, [1, 1]], [1, [1, 1]]],
+  // The even three-by-three. Worth having as itself rather than as eight
+  // panels with one dropped: a nine-grid is a specific thing a page does,
+  // and it is the page a chapter puts next to a two-panel one to make the
+  // rhythm land. The plan is allowed to ask for it, so it has to exist.
+  9: [[1, [1, 1, 1]], [1, [1, 1, 1]], [1, [1, 1, 1]]],
 };
+const MAX_PANELS = Math.max(...Object.keys(PAGE_TEMPLATES).map(Number));
 
 function pageLayout(count) {
-  const tiers = PAGE_TEMPLATES[Math.min(Math.max(count, 1), 8)];
+  const tiers = PAGE_TEMPLATES[Math.min(Math.max(count, 1), MAX_PANELS)];
   const rightToLeft = doc.kind === "manga";
   const innerW = PAGE.w - MARGIN * 2;
   const innerH = PAGE.h - MARGIN * 2;
@@ -3492,7 +3507,7 @@ function pageForNewWork(label) {
 }
 
 async function applyAgentPage(panels, cast) {
-  const beats = panels.slice(0, 8);
+  const beats = panels.slice(0, MAX_PANELS);
   const names = [...new Set(beats.flatMap((p) => p.cast || []))];
   const actions = beats.map((p) => String(p.prompt || "").split(",")[0].trim())
     .filter(Boolean).slice(0, 6).join(", ");
@@ -3583,7 +3598,7 @@ function placeLetteringOnPage(sheet, beats) {
 }
 
 async function applyAgentPanels(panels, opts = {}) {
-  const plan = panels.slice(0, 8).filter((p) => p && p.prompt);
+  const plan = panels.slice(0, MAX_PANELS).filter((p) => p && p.prompt);
   if (!plan.length) return;
   if (opts.replacePage) pageForNewWork("New page");
   const rects = pageLayout(plan.length);
@@ -3970,12 +3985,288 @@ document.getElementById("theme-toggle").onclick = () => {
   localStorage.setItem("studio-theme", chosen);
 };
 
+// -------------------------------------------------------------- chapter mode --
+/* Asking for an eight page chapter used to produce one page.
+
+   Every other part of it was already here: the page navigator, the multi-page
+   export, an agent that adds a page instead of overwriting one, and a
+   workflow spine that declares "plan the pages" as its second step. Nothing
+   ever called that step. One message meant one call meant one page, and the
+   only way to reach page two was to ask again — which meant every page was
+   written by a model with no idea what the chapter was doing or where this
+   page sat inside it.
+
+   That is also the answer to the complaint that a generated chapter is a lot
+   of visuals where nothing happens. A page asked for on its own can only be
+   atmospheric; it was never told what it is for. Now the shape is decided
+   once, before anything is drawn, and each page is handed the thing it has to
+   accomplish and the number of panels it has to do it in. */
+
+const NUMBER_WORDS = {
+  two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
+  ten: 10, eleven: 11, twelve: 12, fourteen: 14, fifteen: 15, sixteen: 16,
+  eighteen: 18, twenty: 20,
+};
+const CHAPTER_PAGES_DEFAULT = 6;
+
+// How many pages this message asks for, or 0 if it is not asking for a
+// chapter at all. Deliberately narrow: a chat about one page must keep
+// behaving as it does, because the loop below costs an image generation per
+// page and deciding on somebody's behalf that they wanted eight is an
+// expensive thing to be wrong about.
+function pagesAskedFor(text) {
+  const lowered = String(text || "").toLowerCase();
+  const digits = lowered.match(/(\d{1,2})\s*-?\s*page/);
+  if (digits) return Math.max(2, Math.min(Number(digits[1]), 24));
+  for (const [word, value] of Object.entries(NUMBER_WORDS)) {
+    if (lowered.includes(word + " page") || lowered.includes(word + "-page")) {
+      return value;
+    }
+  }
+  // "draw me a chapter" is a chapter even with no number attached to it.
+  if (/\bchapters?\b/.test(lowered) && !/\bthis page\b|\bone page\b|\bsingle page\b/.test(lowered)) {
+    return CHAPTER_PAGES_DEFAULT;
+  }
+  return 0;
+}
+
+let chapterRunning = false;
+let chapterStopped = false;
+
+// A message with something to press. The plan is shown before any of it is
+// drawn, because a chapter is many image generations and somebody who did not
+// mean to start one should not discover that by watching the bill.
+function appendAction(text, label, run) {
+  const log = document.getElementById("chat-log");
+  const wrap = document.createElement("div");
+  wrap.className = "msg agent";
+  const body = document.createElement("div");
+  body.textContent = text;
+  body.style.whiteSpace = "pre-wrap";
+  const button = document.createElement("button");
+  button.className = "primary";
+  button.textContent = label;
+  button.style.marginTop = "10px";
+  button.onclick = () => {
+    button.disabled = true;
+    button.textContent = "Drawing…";
+    run();
+  };
+  wrap.append(body, button);
+  log.appendChild(wrap);
+  log.scrollTop = log.scrollHeight;
+  return { wrap, button };
+}
+
+function chapterContext() {
+  return {
+    project: doc.name,
+    kind: doc.kind,
+    art_style: (STYLE_PRESETS[doc.style.preset] || {}).label,
+    layout: recipe().layout,
+    cast: doc.cast,
+    story: doc.story && doc.story.chapter ? doc.story : undefined,
+  };
+}
+
+async function planChapter(brief, wanted) {
+  setBusy(`Planning ${wanted} pages`);
+  try {
+    const response = await api("/agent/plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...chapterContext(),
+        messages: [{ role: "user", content: brief }],
+        pages_wanted: wanted,
+        pages: doc.pages.map((page, index) => ({ index: index + 1 })),
+      }),
+    });
+    const plan = await response.json();
+    if (!plan.ok) throw new Error(plan.error || "the planner is unavailable");
+    if (!Array.isArray(plan.pages) || !plan.pages.length) {
+      throw new Error("the planner returned no pages");
+    }
+    return plan;
+  } finally {
+    setBusy(null);
+  }
+}
+
+// One page of the plan, drawn where it belongs.
+async function drawPlannedPage(brief, plan, index) {
+  const page = plan.pages[index];
+  const instruction = [
+    `Draw page ${index + 1} of ${plan.pages.length}`
+      + (plan.title ? ` of "${plan.title}"` : "") + ".",
+    `What happens on this page: ${page.beat}`,
+    page.changes ? `What must be different afterwards: ${page.changes}` : "",
+    `Use exactly ${page.panels} panels.`,
+    "Do not restate an earlier page, and do not resolve what a later page is for.",
+    "",
+    "The brief, which still governs style and tone:",
+    brief,
+  ].filter(Boolean).join("\n");
+
+  const response = await api("/agent/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...chapterContext(),
+      messages: [{ role: "user", content: instruction }],
+      panels_wanted: page.panels,
+      // what is already drawn, so this page continues it rather than
+      // starting the chapter over
+      pages: doc.pages.map((p, i) => ({
+        index: i + 1,
+        panels: p.layers.filter((l) => l.type === "panel")
+          .map((l) => l.props.prompt || ""),
+        dialogue: p.layers
+          .filter((l) => ["balloon", "caption", "text", "sfx"].includes(l.type))
+          .map((l) => l.props.text || ""),
+      })),
+    }),
+  });
+  const result = await response.json();
+  if (!result.ok) throw new Error(result.error || "agent unavailable");
+  mergeCast(result.cast);
+  if (!Array.isArray(result.panels) || !result.panels.length) {
+    throw new Error("the agent returned no panels");
+  }
+  const layout = recipe().layout;
+  if (layout !== "panels") await applyAgentArtwork(result.panels, layout);
+  else if (doc.style.pageMode !== "panels") await applyAgentPage(result.panels);
+  else await applyAgentPanels(result.panels, { replacePage: true });
+
+  // The navigator now says what each page is for, which is the only place
+  // somebody can see the shape of the chapter they are holding.
+  const label = String(page.beat).split(/[.,;]/)[0].trim().slice(0, 40);
+  currentPage().name = `${index + 1}. ${label}`;
+}
+
+async function drawChapter(brief, plan) {
+  if (chapterRunning) { toast("A chapter is already being drawn"); return; }
+  chapterRunning = true;
+  chapterStopped = false;
+  showChapterStop(true);
+  let made = 0;
+  const failures = [];
+  try {
+    for (let i = 0; i < plan.pages.length; i += 1) {
+      if (chapterStopped) break;
+      setBusy(`Page ${i + 1} of ${plan.pages.length}`);
+      try {
+        // A page that fails must not take the rest of the chapter with it.
+        // Seven good pages and one gap is worth more than a stack trace.
+        await drawPlannedPage(brief, plan, i);
+        made += 1;
+      } catch (error) {
+        failures.push(`page ${i + 1}: ${error.message}`);
+        appendMsg("agent", `Page ${i + 1} failed: ${error.message}`);
+      }
+    }
+  } finally {
+    chapterRunning = false;
+    showChapterStop(false);
+    setBusy(null);
+    renderPageGrid();
+    renderPageLabel();
+    renderCanvas();
+  }
+  if (made) checkpoint(`Chapter: ${made} pages`);
+  const stopped = chapterStopped ? " Stopped early." : "";
+  appendMsg("agent", failures.length
+    ? `${made} of ${plan.pages.length} pages drawn.${stopped} ${failures.join("; ")}`
+    : `${made} pages drawn.${stopped} Read through them with the page strip, `
+      + "or Ctrl+Right.");
+  toast(`${made} of ${plan.pages.length} pages drawn`);
+}
+
+// Somewhere to press stop. A chapter is minutes of generation, and without
+// this the only way out is closing the application, which loses the pages
+// that already worked.
+function showChapterStop(on) {
+  let button = document.getElementById("chapter-stop");
+  if (!on) { if (button) button.remove(); return; }
+  if (button) return;
+  button = document.createElement("button");
+  button.id = "chapter-stop";
+  button.textContent = "Stop the chapter";
+  button.style.cssText = "margin:8px 12px;";
+  button.onclick = () => {
+    chapterStopped = true;
+    button.disabled = true;
+    button.textContent = "Stopping after this page…";
+  };
+  const row = document.getElementById("chat-input-row");
+  row.parentNode.insertBefore(button, row);
+}
+
+async function startChapter(brief, wanted) {
+  let plan;
+  try {
+    plan = await planChapter(brief, wanted);
+  } catch (error) {
+    appendMsg("agent", "Could not plan the chapter: " + error.message
+      + ". Asking for a single page still works.");
+    return;
+  }
+  if (plan.chapter) doc.story.chapter = plan.chapter;
+
+  const short = plan.pages.length < plan.wanted
+    ? `\n\nThe planner returned ${plan.pages.length} pages, not ${plan.wanted}.`
+      + " Drawing what it planned rather than padding it out."
+    : "";
+  // Three different states, said as three different things. "Looked up
+  // nothing" and "still looking" and "looked and did not recognise it" lead
+  // to different decisions, and collapsing them into one line is how a
+  // lookup that never worked went unnoticed for two releases.
+  let researched;
+  if ((plan.researched || []).length) {
+    researched = `\n\nLooked up: ${plan.researched.join(", ")}`
+      + (plan.style_confidence === "low"
+        ? " — but the research was thin, so treat the style as a guess."
+        : ".");
+  } else if (plan.still_researching) {
+    researched = "\n\nStill looking up the references. They will be applied"
+      + " from the first page, so there is no need to wait.";
+  } else {
+    researched = "\n\nNothing recognisable to look up in that brief, so the"
+      + " style comes from the description alone.";
+  }
+  const listing = plan.pages
+    .map((p, i) => `${i + 1}. (${p.panels} panels) ${p.beat}`)
+    .join("\n");
+
+  appendAction(
+    (plan.title ? plan.title + "\n\n" : "") + listing + researched + short
+      + `\n\n${plan.pages.length} pages, one image generation each.`,
+    `Draw all ${plan.pages.length} pages`,
+    () => drawChapter(brief, plan));
+}
+
 async function sendChat(overrideText, quiet) {
   const input = document.getElementById("chat-input");
   const text = (overrideText != null ? overrideText : input.value).trim();
   if (!text) return;
   if (overrideText == null) input.value = "";
   if (!quiet) appendMsg("user", text);
+
+  // A request for a chapter is planned first, then drawn page by page.
+  //
+  // Only for layouts that have pages: a poster is one image, and "a six page
+  // poster" means something else entirely.
+  //
+  // And only for a message somebody typed. The quiet flag is what the
+  // existing page loops pass, and they pass the original brief through again
+  // — which may well be the words "an 8-page chapter". Without this, each
+  // page of a chapter would start a chapter of its own.
+  const wanted = quiet ? 0 : pagesAskedFor(text);
+  if (wanted && recipe().layout === "panels" && !chapterRunning) {
+    doc.chat.push({ role: "user", content: text });
+    await startChapter(text, wanted);
+    return;
+  }
   doc.chat.push({ role: "user", content: text });
   const thinking = appendMsg("agent", "…");
   setBusy("Directing the page");
