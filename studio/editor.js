@@ -1,4 +1,4 @@
-/* prod-imagen studio — editor core (v0.3)
+/* Firestarter — editor core (v0.3)
    Model: document -> pages -> layers. The layers list is the source of
    truth; the Konva canvas renders it. All lettering is vector text.
    v0.3: brush + eraser, shapes, image import + crop, multi-select,
@@ -1975,6 +1975,84 @@ stage.container().addEventListener("contextmenu", (event) => {
     showContextMenu(event.clientX, event.clientY, contextItemsForCanvas());
   }
 });
+/* Right clicking anything that is not the canvas.
+
+   Electron ships no context menu of its own, anywhere. The canvas had
+   one, so cutting and copying a shape worked, while right clicking the
+   agent's reply or a prompt field produced nothing at all: no copy, no
+   paste, no select all. In a browser those come free, which makes them
+   easy to forget when building a window from scratch.
+
+   Editable fields get the full set, selected text gets copy, and a right
+   click with nothing to act on is left alone rather than answered with a
+   menu of greyed out items. */
+/* What a right click somewhere other than the canvas should offer.
+
+   Separated from the event so it can be checked. A headless browser will
+   not hold a text selection, so driving this through getSelection proves
+   nothing there; passing the selection in means the decision is testable
+   even where the browser cannot make one. */
+function textMenuItems(target, selected) {
+  if (!target || !target.matches) return null;
+  const editable = target.matches("input, textarea, [contenteditable=true]");
+  if (!editable && !selected) return null;            // nothing worth offering
+
+  const items = [];
+  if (editable && "selectionStart" in target) {
+    const field = target;
+    const nothingChosen = field.selectionStart === field.selectionEnd;
+    const chosen = () => String(field.value || "")
+      .slice(field.selectionStart, field.selectionEnd);
+    const replace = (text) => {
+      const from = field.selectionStart;
+      const to = field.selectionEnd;
+      field.value = field.value.slice(0, from) + text + field.value.slice(to);
+      field.selectionStart = field.selectionEnd = from + text.length;
+      // so anything watching the field reacts as if it had been typed
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    items.push({
+      label: "Cut", accel: "Ctrl+X", disabled: nothingChosen,
+      run: async () => {
+        const text = chosen();
+        if (!text) return;
+        await navigator.clipboard.writeText(text);
+        replace("");
+      },
+    });
+    items.push({
+      label: "Copy", accel: "Ctrl+C", disabled: nothingChosen,
+      run: () => navigator.clipboard.writeText(chosen()),
+    });
+    items.push({
+      label: "Paste", accel: "Ctrl+V",
+      run: async () => {
+        const text = await navigator.clipboard.readText();
+        if (text) replace(text);
+      },
+    });
+    items.push("-");
+    items.push({ label: "Select All", accel: "Ctrl+A", run: () => field.select() });
+  } else {
+    items.push({
+      label: "Copy", accel: "Ctrl+C",
+      run: () => navigator.clipboard.writeText(selected),
+    });
+  }
+  return items;
+}
+
+document.addEventListener("contextmenu", (event) => {
+  const target = event.target;
+  if (!target || (stage.container().contains && stage.container().contains(target))) {
+    return;                                           // the canvas has its own
+  }
+  const items = textMenuItems(target, String(window.getSelection() || "").trim());
+  if (!items) return;
+  event.preventDefault();
+  showContextMenu(event.clientX, event.clientY, items);
+});
+
 document.addEventListener("click", hideContextMenu);
 document.addEventListener("keydown", (event) => { if (event.key === "Escape") hideContextMenu(); });
 window.addEventListener("blur", hideContextMenu);
@@ -3966,7 +4044,7 @@ document.getElementById("chat-input").addEventListener("keydown", (event) => {
 
 // ------------------------------------------------------------------ init --
 document.getElementById("project-title").textContent = doc.name;
-document.title = `${doc.name} — prod-imagen studio`;
+document.title = `${doc.name} — Firestarter`;
 document.querySelectorAll(".dock-tab").forEach((tab) => {
   tab.addEventListener("click", () => {
     document.querySelectorAll(".dock-tab").forEach((t) => t.classList.remove("active"));

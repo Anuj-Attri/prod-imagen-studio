@@ -1,11 +1,11 @@
-/* prod-imagen studio: project launcher.
+/* Firestarter: project launcher.
    Kept out of the HTML so the page can run under a strict
    Content-Security-Policy that forbids inline script. */
 // the footer states the running version rather than a number that
 // drifts out of step with the manifest
 if (window.studio && window.studio.version) {
   window.studio.version().then((v) => {
-    if (v) document.getElementById("version").textContent = "prod-imagen studio " + v;
+    if (v) document.getElementById("version").textContent = "Firestarter " + v;
   });
 }
 

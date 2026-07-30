@@ -1,4 +1,4 @@
-# prod-imagen studio
+# Firestarter
 
 A layered canvas studio for visual stories. One tool for a manga
 chapter, a coloring book, a poster, a greeting card and a systems
@@ -114,7 +114,7 @@ Download the installer for Windows (`.exe`) or macOS (`.dmg`) from the
 Requirements: Node 22+, Python 3.12+.
 
     git clone <this repository>
-    cd prod-imagen-studio
+    cd firestarter
     cd studio && npm install && cd ..
 
 Windows: `start-studio.cmd`  ·  macOS and Linux: `./start-studio.sh`

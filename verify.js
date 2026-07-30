@@ -92,7 +92,7 @@ function waitForServer(port, timeoutMs) {
 }
 
 (async () => {
-  console.log("prod-imagen studio: verifying\n");
+  console.log("Firestarter: verifying\n");
 
   step("sources parse", () => node([
     "--check", path.join("studio", "main.js"),

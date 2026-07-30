@@ -1802,6 +1802,109 @@ check("asking for another take still gives a different one", () => {
     : "another take reproduced the same art";
 });
 
+check("right clicking the canvas actually opens the menu", () => {
+  // The existing check called the menu's actions directly, so it proved
+  // the actions work and never proved the menu opens. Reported broken
+  // twice while that check stayed green, which is the signature of
+  // testing the payload instead of the trigger.
+  resetForCheck("manga");
+  const menu = document.querySelector(".menu-drop");
+  if (!menu) return "no menu element was ever created";
+  menu.classList.remove("show");
+
+  // Dispatched on the canvas a person actually clicks, not on the
+  // container the listener happens to be attached to. Aiming at the
+  // container proves the listener fires and proves nothing about whether
+  // a real click ever reaches it.
+  const container = stage.container();
+  if (!container) return "the stage has no container to right click on";
+  const target = container.querySelector("canvas") || container;
+  if (target === container) return "the stage drew no canvas to click on";
+  target.dispatchEvent(new MouseEvent("contextmenu",
+    { bubbles: true, cancelable: true, clientX: 200, clientY: 200 }));
+
+  if (!menu.classList.contains("show")) {
+    return "right clicking the canvas itself opened nothing";
+  }
+  return menu.querySelectorAll(".menu-item").length > 0 ? true
+    : "the menu opened with nothing in it";
+});
+
+check("right clicking a text field offers cut, copy and paste", () => {
+  // The reported fault. The canvas had a menu, so shapes could be cut and
+  // copied; everywhere else in the window a right click produced nothing,
+  // because Electron ships no menu of its own and the checks only ever
+  // exercised the canvas.
+  resetForCheck("manga");
+  const menu = document.querySelector(".menu-drop");
+  menu.classList.remove("show");
+
+  const field = document.createElement("textarea");
+  field.value = "some words worth keeping";
+  document.body.appendChild(field);
+  field.selectionStart = 0;
+  field.selectionEnd = 4;
+  field.dispatchEvent(new MouseEvent("contextmenu",
+    { bubbles: true, cancelable: true, clientX: 120, clientY: 120 }));
+
+  const labels = [...menu.querySelectorAll(".menu-item")]
+    .map((el) => el.textContent.trim());
+  field.remove();
+  if (!menu.classList.contains("show")) {
+    return "right clicking a text field still opens nothing";
+  }
+  const missing = ["Cut", "Copy", "Paste", "Select All"]
+    .filter((wanted) => !labels.some((label) => label.startsWith(wanted)));
+  return missing.length === 0 ? true
+    : "a text field's menu did not offer: " + missing.join(", ");
+});
+
+check("selected text is offered a copy, even where the browser cannot select", () => {
+  // A headless browser holds no text selection, so this cannot be driven
+  // through getSelection here. The decision is checked directly instead:
+  // pretending otherwise would be a check that proves nothing and reads
+  // as though it proves something.
+  resetForCheck("manga");
+  const block = document.createElement("p");
+  block.textContent = "a line the agent wrote";
+  const items = textMenuItems(block, "a line the agent wrote");
+  if (!items) return "text with a selection was offered no menu at all";
+  const labels = items.filter((i) => i !== "-").map((i) => i.label);
+  return labels.length === 1 && labels[0] === "Copy" ? true
+    : "expected only a copy option, got: " + labels.join(", ");
+});
+
+check("a right click with nothing to act on is left alone", () => {
+  resetForCheck("manga");
+  const menu = document.querySelector(".menu-drop");
+  menu.classList.remove("show");
+  window.getSelection().removeAllRanges();
+
+  const empty = document.createElement("div");
+  document.body.appendChild(empty);
+  empty.dispatchEvent(new MouseEvent("contextmenu",
+    { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+  const opened = menu.classList.contains("show");
+  empty.remove();
+  return !opened ? true
+    : "a menu of nothing useful was offered on empty space";
+});
+
+check("the menu on a selected layer offers cut and copy", () => {
+  resetForCheck("manga");
+  const menu = document.querySelector(".menu-drop");
+  const shape = addLayer("rect", { x: 40, y: 40, w: 120, h: 120 });
+  select(shape.id);
+  showContextMenu(100, 100, contextItemsForSelection());
+
+  const labels = [...menu.querySelectorAll(".menu-item")]
+    .map((el) => el.textContent.trim());
+  const missing = ["Cut", "Copy", "Duplicate", "Delete"]
+    .filter((wanted) => !labels.some((label) => label.startsWith(wanted)));
+  return missing.length === 0 ? true
+    : "the menu did not offer: " + missing.join(", ");
+});
+
 check("the update notice appears, and offers to restart once ready", async () => {
   // This path only runs when a real update arrives, so nothing exercised
   // it: the first draft called a save function that does not exist and

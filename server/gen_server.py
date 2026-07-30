@@ -1,4 +1,4 @@
-"""prod-imagen studio generation server.
+"""Firestarter generation server.
 
 One generation interface, multiple engines:
   local-gpu     - diffusers on the local GPU, free and offline
@@ -451,7 +451,7 @@ def llm_chat(current: dict, system: str, messages: list, max_tokens: int = 900,
             "https://openrouter.ai/api/v1/chat/completions",
             request,
             {"Authorization": f"Bearer {current['openrouter']}",
-             "X-Title": "prod-imagen studio"},
+             "X-Title": "Firestarter"},
             timeout=180,
         )
         message = (result.get("choices") or [{}])[0].get("message") or {}
@@ -528,7 +528,7 @@ def analyze_story(payload: dict, current: dict) -> dict:
 
 
 AGENT_SYSTEM = (
-    "You are the page director inside prod-imagen studio, a layered "
+    "You are the page director inside Firestarter, a layered "
     "canvas tool for manga, anime, posters and illustration. You BUILD "
     "pages; you never write essays. Answer with raw JSON only, no "
     "markdown, no code fences, in exactly this shape: "

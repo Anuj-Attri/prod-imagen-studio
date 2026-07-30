@@ -105,7 +105,7 @@ def review(diff: str, key: str, step: str = "critique") -> dict:
     request = urllib.request.Request(OPENROUTER_CHAT, data=body, headers={
         "Authorization": "Bearer " + key,
         "Content-Type": "application/json",
-        "X-Title": "prod-imagen studio review",
+        "X-Title": "Firestarter review",
     })
     try:
         with urllib.request.urlopen(request, timeout=180) as response:
