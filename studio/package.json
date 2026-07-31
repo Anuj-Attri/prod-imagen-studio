@@ -5,6 +5,8 @@
   "main": "main.js",
   "author": "Anuj Attri",
   "license": "SEE LICENSE IN ../LICENSE",
+  "homepage": "https://github.com/Anuj-Attri/prod-imagen-studio",
+  "desktopName": "firestarter.desktop",
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --publish never",
@@ -72,6 +74,28 @@
       ],
       "category": "public.app-category.graphics-design",
       "icon": "../build/icon.png"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "../build/icon.png",
+      "category": "Graphics;2DGraphics;RasterGraphics",
+      "synopsis": "Layered canvas studio for visual stories",
+      "description": "A desktop drawing app for comics and illustration: a layered canvas with brush, shapes, guides and undo, and an agent panel that lays out pages, writes the dialogue into them and exports a chapter as one PDF.",
+      "syncDesktopName": true,
+      "maintainer": "Anuj Attri <anuj-attri@users.noreply.github.com>"
     },
     "publish": [
       {
