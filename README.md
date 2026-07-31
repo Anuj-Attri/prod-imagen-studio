@@ -17,11 +17,22 @@ Download the installer from [Releases](../../releases):
 - **Windows**: `Firestarter-<version>-win-x64.exe`
 - **Mac, Apple silicon**: `Firestarter-<version>-mac-arm64.dmg`
 - **Mac, Intel**: `Firestarter-<version>-mac-x64.dmg`
+- **Ubuntu, Debian**: `Firestarter-<version>-linux-amd64.deb`
+- **Any other Linux**: `Firestarter-<version>-linux-x86_64.AppImage`
 
 Run it. On Windows, SmartScreen will warn you the publisher is unknown:
 click **More info**, then **Run anyway**. On macOS, right-click the app and
 choose **Open** the first time, because the build is not signed with a paid
 Apple certificate.
+
+On Ubuntu, install the `.deb` from a terminal, so that the libraries it
+needs are pulled in with it:
+
+    sudo apt install ./Firestarter-<version>-linux-amd64.deb
+
+The AppImage is for every other distribution and installs nothing: mark it
+executable with `chmod +x` and run it. It expects FUSE, which most desktops
+already have; if it complains, run it with `--appimage-extract-and-run`.
 
 Firestarter needs an internet connection and an access token. Open
 **Settings** and paste the token under *Advanced*. Ask Anuj for one.
@@ -31,7 +42,8 @@ weights to download, and no API keys to buy. Generation runs on a shared
 backend.
 
 Updates install themselves. When a new version is out, a notice appears in
-the app.
+the app. The `.deb` is the one exception: replacing a system package needs
+root, so it asks for your password at that point.
 
 ## Running your own backend
 
