@@ -17,11 +17,29 @@ Download the installer from [Releases](../../releases):
 - **Windows**: `Firestarter-<version>-win-x64.exe`
 - **Mac, Apple silicon**: `Firestarter-<version>-mac-arm64.dmg`
 - **Mac, Intel**: `Firestarter-<version>-mac-x64.dmg`
+- **Ubuntu and other Debian systems**: `Firestarter-<version>-linux-amd64.deb`
+- **Any other Linux**: `Firestarter-<version>-linux-x86_64.AppImage`
 
 Run it. On Windows, SmartScreen will warn you the publisher is unknown:
 click **More info**, then **Run anyway**. On macOS, right-click the app and
 choose **Open** the first time, because the build is not signed with a paid
 Apple certificate.
+
+On Ubuntu, install the `.deb` with the package manager, so its dependencies
+come with it:
+
+    sudo apt install ./Firestarter-<version>-linux-amd64.deb
+
+It lands in the applications menu. The AppImage is one file and installs
+nothing: make it executable and run it.
+
+    chmod +x Firestarter-<version>-linux-x86_64.AppImage
+    ./Firestarter-<version>-linux-x86_64.AppImage
+
+Prefer the `.deb` on Ubuntu 24.04 and later. Installing it also installs the
+AppArmor profile the browser sandbox needs there; the AppImage installs
+nothing, so on those systems it may refuse to start until it is run with
+`--no-sandbox`.
 
 Firestarter needs an internet connection and an access token. Open
 **Settings** and paste the token under *Advanced*. Ask Anuj for one.
@@ -31,7 +49,8 @@ weights to download, and no API keys to buy. Generation runs on a shared
 backend.
 
 Updates install themselves. When a new version is out, a notice appears in
-the app.
+the app. From a `.deb` the update is installed with `dpkg`, so the system
+asks for your password before it replaces the package.
 
 ## Running your own backend
 
