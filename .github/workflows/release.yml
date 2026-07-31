@@ -22,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [windows-latest, macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -79,7 +79,7 @@ jobs:
           # absent .exe, on Windows for the absent .dmg, while the
           # installers it was looking for sat in the listing above it.
           shopt -s nullglob
-          built=(dist/*.exe dist/*.dmg dist/*.zip)
+          built=(dist/*.exe dist/*.dmg dist/*.zip dist/*.AppImage dist/*.deb)
           echo "installable artifacts: ${#built[@]}"
           if [ ${#built[@]} -eq 0 ]; then
             echo "::error::${{ matrix.os }} produced no installer"
@@ -94,6 +94,8 @@ jobs:
             studio/dist/*.exe
             studio/dist/*.dmg
             studio/dist/*.zip
+            studio/dist/*.AppImage
+            studio/dist/*.deb
             studio/dist/*.blockmap
             studio/dist/latest*.yml
 
